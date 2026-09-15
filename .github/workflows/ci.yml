@@ -1,49 +1,20 @@
-name: ci
-
-on:
-  push:
-    branches: [main, 'release/**']
-  pull_request:
-
+name: CI
+on: [push, pull_request]
 jobs:
   test:
-    runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
         node: [22, 24]
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - name: Install test prerequisites
-        run: sudo apt-get update && sudo apt-get install -y jq
-      - name: Install dependencies
-        run: npm ci
-      - name: Audit production dependencies
-        run: npm run audit
-      - name: Syntax-check JavaScript
-        run: |
-          for file in daemon/*.mjs channel/*.mjs scripts/*.mjs; do
-            node --check "$file"
-          done
-      - name: Test
-        run: npm run test:all
-      - name: Type-check TypeScript
-        run: npm run typecheck
-      - name: Check docs and release contracts
-        run: npm run check
-
-  shellcheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install ShellCheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
-      - name: Shellcheck scripts
-        run: |
-          shellcheck -S warning \
-            bin/sab scripts/run-session.sh scripts/claude-consent.sh \
-            scripts/sab-account.sh hooks/hook.sh hooks/codex-hook.sh \
-            install.sh install-codex.sh
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run audit

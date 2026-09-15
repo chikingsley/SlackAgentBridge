@@ -2,11 +2,16 @@ node_modules/
 dist/
 direct-agent.json
 agents.json
+gateway.json
+connector.json
+env
+*.lock
 *.state.json
 *.state.json.tmp
 *.events.json
 *.events.json.tmp
 *.status.json
+*.status.json.tmp
 *.delivery.json
 *.delivery.json.tmp
 .env

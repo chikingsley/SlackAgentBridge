@@ -1,0 +1,7 @@
+{
+  "workspaceDomain": "your-workspace.slack.com",
+  "channelIds": ["C1234567890"],
+  "allowedUserIds": ["U1234567890"],
+  "publicUrl": "https://your-gateway.example.com",
+  "port": 8877
+}

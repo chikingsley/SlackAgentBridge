@@ -1,114 +1,24 @@
 {
   "display_information": {
-    "name": "Slack Agent Bridge",
-    "description": "Control and hand off local Claude Code and Codex sessions from Slack",
+    "name": "Codex Agent Bridge",
+    "description": "Connect selected local Codex agents to Slack",
     "background_color": "#1a1a2e"
   },
   "features": {
     "bot_user": {
-      "display_name": "Clavdivs",
+      "display_name": "Codex Agent",
       "always_online": true
     },
-    "app_home": {
-      "home_tab_enabled": true,
-      "messages_tab_enabled": false
-    },
     "slash_commands": [
-      {
-        "command": "/sab-new",
-        "description": "Start a headless Claude or Codex session",
-        "usage_hint": "<claude | codex> [folder] [flags]",
-        "should_escape": false
-      },
-      {
-        "command": "/sab-model",
-        "description": "Show or set the active session's model",
-        "usage_hint": "[model id or alias]",
-        "should_escape": false
-      },
-      {
-        "command": "/sab-effort",
-        "description": "Show or set the active session's reasoning effort",
-        "usage_hint": "[level]",
-        "should_escape": false
-      },
-      {
-        "command": "/sab-flags",
-        "description": "Show or change the active session's launch flags",
-        "usage_hint": "[provider flags]",
-        "should_escape": false
-      },
-      {
-        "command": "/sab-update",
-        "description": "Choose or run a safe provider update",
-        "usage_hint": "[current | all]",
-        "should_escape": false
-      },
       {
         "command": "/sab-stop",
         "description": "Interrupt the active session's running turn",
         "should_escape": false
       },
       {
-        "command": "/sab-switch",
-        "description": "Hand this channel to another provider",
-        "usage_hint": "<claude | codex> [new]",
-        "should_escape": false
-      },
-      {
-        "command": "/sab-kill",
-        "description": "End one exact session while keeping its channel resumable",
-        "usage_hint": "[here | session id]",
-        "should_escape": false
-      },
-      {
         "command": "/sab-status",
         "description": "Show this session or list sessions from the control channel",
         "usage_hint": "[claude | codex]",
-        "should_escape": false
-      },
-      {
-        "command": "/sab-usage",
-        "description": "Show provider usage for this session or the control channel",
-        "usage_hint": "[provider] [days [n] | models | limits]",
-        "should_escape": false
-      },
-      {
-        "command": "/sab-account",
-        "description": "Show or change a Claude session's subscription",
-        "usage_hint": "[name | default]",
-        "should_escape": false
-      },
-      {
-        "command": "/sab-terminal",
-        "description": "List, open, focus, or close optional terminal viewports",
-        "usage_hint": "[list | open | close | open-all | close-all]",
-        "should_escape": false
-      },
-      {
-        "command": "/sab-team",
-        "description": "Link SAB sessions for secure agent delegation",
-        "usage_hint": "[create | add | status | auto | manual | drain | resume | permissions | remove | close]",
-        "should_escape": false
-      },
-      {
-        "command": "/sab-health",
-        "description": "Show bridge daemon health",
-        "should_escape": false
-      },
-      {
-        "command": "/sab-cleanup",
-        "description": "Archive dormant session channels",
-        "should_escape": false
-      },
-      {
-        "command": "/sab-claim",
-        "description": "Claim this bridge as its owner",
-        "should_escape": false
-      },
-      {
-        "command": "/sab-help",
-        "description": "List Slack Agent Bridge commands",
         "should_escape": false
       }
     ]
@@ -118,22 +28,16 @@
       "bot": [
         "commands",
         "chat:write",
-        "channels:manage",
         "channels:read",
         "channels:history",
-        "groups:write",
         "groups:read",
-        "groups:history",
-        "files:write",
-        "files:read",
-        "users:read"
+        "groups:history"
       ]
     }
   },
   "settings": {
     "event_subscriptions": {
       "bot_events": [
-        "app_home_opened",
         "message.channels",
         "message.groups"
       ]

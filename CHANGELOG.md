@@ -1,6 +1,23 @@
 # Changelog
 
-## Unreleased
+## [3.0.0] - 2026-09-15
+
+### Changed
+- Native Codex-only TypeScript gateway and independent per-computer connectors.
+- Private single-use Slack pairing, explicit task registration, owner-controlled sharing and revocation.
+- Background start/stop commands with private loopback shutdown controls.
+- Vitest tests exclusively in tests/. Removed the obsolete terminal daemon, Pi/Claude adapters, hooks and installers; no .mjs source remains.
+
+### Fixed
+- Initialize fresh native tasks before closing setup so their first resume succeeds.
+- Preserve exact reply roots and reject offline routing without local fallback or uncertain replay.
+
+### Verification
+- Windows and macOS build, strict typechecking, 24 Vitest tests and dependency audit.
+- Live tests in a dedicated private channel: two devices, independent context, offline rejection and restart/resume.
+
+
+## 2.1 development snapshot (d30e521, superseded by 3.0.0)
 
 ### Added
 

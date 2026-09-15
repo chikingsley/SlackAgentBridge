@@ -8,7 +8,7 @@ const optionValue = value => {
 }
 const providerName = provider => provider === 'claude' ? 'Claude Code'
   : provider === 'codex' ? 'Codex'
-    : provider === 'pi' ? 'Pi' : text(provider)
+    : (text(provider))
 
 function token(value, field) {
   const normalized = String(value || '')

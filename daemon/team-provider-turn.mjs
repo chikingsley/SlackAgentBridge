@@ -142,7 +142,7 @@ export function deferPendingTeamProviderFinal(session, {
 } = {}) {
   const pending = normalizedTurn(session?.teamProviderTurnPending,
     session?.teamProviderTurnPending?.stagedAt)
-  if (!session || !pending || !['claude', 'codex', 'pi'].includes(provider)) return null
+  if (!session || !pending || !['claude', 'codex'].includes(provider)) return null
   const observed = Number(observedAt)
   const afterPendingBoundary = Number.isSafeInteger(observed) && observed > 0 &&
     observed >= pending.startedAt
@@ -192,7 +192,7 @@ export function deferPendingTeamProviderFinal(session, {
 export function deferredTeamProviderFinal(session, expected = null) {
   const record = session?.teamProviderTurnDeferredFinal
   const turn = normalizedTurn(record, record?.observedAt || Date.now(), record?.providerTurnId)
-  if (!record || !turn || !['claude', 'codex', 'pi'].includes(record.provider)) return null
+  if (!record || !turn || !['claude', 'codex'].includes(record.provider)) return null
   if (expected && (turn.taskId !== expected.taskId ||
       turn.providerWorkGeneration !== Number(expected.providerWorkGeneration))) return null
   const settlementClaimedAt = Number(record.settlementClaimedAt)

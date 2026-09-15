@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Named agent creation through Slack mentions, durable thread-reply routing,
+  per-owner agents and explicit collaborator sharing using native Codex App
+  Server. New TypeScript tests are centralized under `tests/direct/` with Vitest.
+
+- TypeScript direct Codex mode for one explicit Slack owner/channel and native
+  task, using the existing Codex App Server and login without tmux or a terminal
+  UI. Includes native message/approval/stop handling, metadata/attachment probes,
+  and durable duplicate suppression. Legacy team and file features remain in
+  the terminal daemon.
+
+### Removed
+
+- Pi provider, native extension, managed runs, installer, and Slack controls.
+  This fork supports Claude Code and Codex using existing local CLIs.
+
 Notable changes to this project. Format based on
 [Keep a Changelog](https://keepachangelog.com/); versioning per
 [Semantic Versioning](https://semver.org/).

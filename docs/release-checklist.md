@@ -23,9 +23,6 @@
 - [ ] `npm test`
 - [ ] `npm run check`
 - [ ] `for file in daemon/*.mjs channel/*.mjs scripts/*.mjs; do node --check "$file"; done`
-- [ ] `PI_OFFLINE=1 pi --extension ./pi/sab-extension.ts --list-models`
-- [ ] `node scripts/smoke-pi-managed.mjs` against its disposable fixture.
-- [ ] `shellcheck -S warning bin/sab scripts/run-session.sh scripts/claude-consent.sh scripts/sab-account.sh hooks/hook.sh hooks/codex-hook.sh install.sh install-codex.sh install-pi.sh`
 - [ ] Installer help/provider selection passes in a clean shell.
 - [ ] CI passes on the release commit.
 
@@ -33,9 +30,8 @@
 
 - [ ] Upgrade an existing Claude-only 1.x installation.
 - [ ] Upgrade existing Claude + Codex and all-provider installations.
-- [ ] Fresh Claude-only, Codex-only, Pi-only, `both`, and `all` installations.
+- [ ] Fresh Claude-only, Codex-only, `both`, and `all` installations.
 - [ ] Re-running each installer is idempotent.
-- [ ] `install-codex.sh` and `install-pi.sh` do not reload or rewrite the live
       LaunchAgent.
 - [ ] A no-reload installer invoked from a different worktree fails before
       changing provider hooks, configuration, Git state, or the `sab` link.
@@ -66,7 +62,7 @@
 - [ ] Record the previous release tag and rollback commands.
 - [ ] Confirm no provider switch or automation launch is mid-transaction.
 - [ ] Exactly one daemon connects with the production Socket Mode token.
-- [ ] Existing active Claude, Codex, and Pi processes are re-adopted without a
+- [ ] Existing active Claude and Codex processes are re-adopted without a
       duplicate channel, process, prompt, or topic write.
 - [ ] An in-progress turn for every provider regains its working line and
       original elapsed duration after restart.
@@ -127,11 +123,10 @@
       owner message retries a truly dormant session without duplication.
 - [ ] A delayed failed SessionStart cannot clear a newer maintenance generation,
       including when the same session record was rebound to a new native ID.
-- [ ] `/sab-account` works only for Claude and `/sab-run` only for Pi.
-- [ ] Claude/Codex permission relay and Pi safe-mode/project-trust decisions work.
-- [ ] Pi image input, adaptive routing, plan/approve, pause/resume, all budgets,
+- [ ] Claude/Codex permission relay decisions work.
+
       failure reporting, independent review, and exactly-one final response work.
-- [ ] Claude ↔ Codex ↔ Pi switching preserves one channel, native identities,
+- [ ] Claude ↔ Codex switching preserves one channel, native identities,
       settings, queued-message order, rollback, and standby legs.
 - [ ] Switch trust gates open the exact target terminal and explain the required
       local action in Slack.
@@ -183,16 +178,7 @@
       queued work dispatches exactly once. Restart with an unproven legacy task
       and confirm it fails closed without replay, while a live active turn and
       a durable reported task are re-adopted without manual activation.
-- [ ] Restart during a Pi worker turn. Confirm its persisted start timestamp
-      alone does not restore worker proof or polling, a new native Pi event does,
-      and an unproved historical turn releases its stale task/poller/input fences
-      without replay after the recovery grace period.
-- [ ] Reconnect Pi while its native input surface is already idle. Confirm the
-      stale re-adopted task is released without replay and one fresh queued task
-      dispatches without requiring an owner prompt.
-- [ ] Disconnect Pi's input stream before a coordinator task message. Confirm
-      the known-undelivered journal stays pending and delivers once after
-      reconnect; an uncertain provider write remains failed and is never retried.
+
 - [ ] Repeat ordinary and dispatch-healing worker replies. Confirm each exact
       task/reply/lifecycle version produces at most one coordinator wake and a
       later real lifecycle version still wakes once.

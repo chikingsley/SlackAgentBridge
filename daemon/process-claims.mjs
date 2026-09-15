@@ -1,8 +1,5 @@
-const PROVIDER_COMM = Object.freeze({
-  claude: /claude/i,
-  codex: /codex/i,
-  pi: /(?:^|\/)pi(?:$|\s)/i,
-})
+const PROVIDER_COMM = Object.freeze({claude: /claude/i,
+codex: /codex/i})
 
 // A provider utility launched from inside an interactive provider (for example
 // `codex review`) inherits the tmux and hook environment. It is nevertheless a
@@ -13,7 +10,7 @@ export function isNestedProviderClaim(processes, pid, panePids, provider) {
   const panes = new Set((panePids || []).map(Number))
   const pattern = PROVIDER_COMM[provider]
   if (!pattern) return true
-  // The detached runner execs Claude/Pi directly, so the authoritative
+  // The detached runner execs Claude directly, so the authoritative
   // provider may itself own the tmux pane rather than being its descendant.
   if (panes.has(Number(pid))) return false
   let current = Number(rows.get(Number(pid))?.ppid)

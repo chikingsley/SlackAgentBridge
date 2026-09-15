@@ -1,7 +1,7 @@
 # Session teams
 
 Session teams let one SAB channel coordinate explicit work in other SAB
-channels without giving Claude Code, Codex, or Pi Slack credentials or generic
+channels without giving Claude Code or Codex Slack credentials or generic
 channel access. The first release is local-node only and uses a safe star:
 
 ```text
@@ -142,9 +142,6 @@ channels and injecting it into the same authoritative worker session. Retries
 need the same request ID and content. Delivery is rejected while the worker has
 an open question or permission prompt, because that is not a safe text-input
 surface. An uncertain provider-side message is reported and never replayed.
-If Pi has no connected input stream, no provider write has occurred: the
-message remains pending and the reconciler submits it once after the exact
-authoritative stream reconnects.
 
 ## Completion and release
 
@@ -274,13 +271,8 @@ session but is deliberately not submitted as unrelated task input. Coordinator
 follow-ups accepted during downtime remain durable, are mirrored in both team
 channels, and enter the provider exactly once after re-adoption.
 
-For Pi, a persisted turn-start timestamp is not post-restart liveness proof.
-SAB waits for a new native extension status/start event before restoring its
-poller or delegated-task authority; otherwise recovery releases the stale task,
-poller, and input fences without replay.
-
 Claude transcript completion, the Codex Stop hook or exact successful App Server
-turn, or the Pi extension supplies a stable provider turn report. SAB persists
+turn supplies a stable provider turn report. SAB persists
 that report plus an idempotent Slack delivery claim before reporting it in the
 coordinator channel. Explicit coordinator release later persists terminal
 completion and its own delivery claim. Restart

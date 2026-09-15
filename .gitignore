@@ -1,4 +1,14 @@
 node_modules/
+dist/
+direct-agent.json
+agents.json
+*.state.json
+*.state.json.tmp
+*.events.json
+*.events.json.tmp
+*.status.json
+*.delivery.json
+*.delivery.json.tmp
 .env
 spike/.env
 *.log

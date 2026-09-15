@@ -1,16 +1,16 @@
 #!/bin/bash
 # Slack Agent Bridge installer (macOS). Idempotent and upgrade-safe.
-#   One-liner: curl -fsSL https://raw.githubusercontent.com/SergioTCG/SlackAgentBridge/main/install.sh | bash
-#   Providers: ./install.sh --provider claude|codex|pi|both|all
+#   One-liner: curl -fsSL https://raw.githubusercontent.com/chikingsley/SlackAgentBridge/main/install.sh | bash
+#   Providers: ./install.sh --provider claude|codex|both|all
 set -euo pipefail
 
-REPO_URL="https://github.com/SergioTCG/SlackAgentBridge.git"
+REPO_URL="https://github.com/chikingsley/SlackAgentBridge.git"
 INSTALL_PROVIDER="${CCS_INSTALL_PROVIDER:-claude}"
 RELOAD_DAEMON=1
 
 usage() {
   cat <<'EOF'
-Usage: ./install.sh [--provider claude|codex|pi|both|all] [--no-daemon-reload]
+Usage: ./install.sh [--provider claude|codex|both|all] [--no-daemon-reload]
 
   --provider             Install one CLI integration, Claude+Codex (`both`),
                          or every provider (`all`; default: claude).
@@ -29,8 +29,8 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 case "$INSTALL_PROVIDER" in
-  claude|codex|pi|both|all) ;;
-  *) printf 'Unsupported provider: %s (use claude, codex, pi, both, or all)\n' "$INSTALL_PROVIDER" >&2; exit 2 ;;
+  claude|codex|both|all) ;;
+  *) printf 'Unsupported provider: %s (use claude, codex, both, or all)\n' "$INSTALL_PROVIDER" >&2; exit 2 ;;
 esac
 
 # Compatibility contract: do not create a second LaunchAgent during the rename.
@@ -146,7 +146,6 @@ LOG="$BRIDGE/daemon.log"
 say() { printf '%s\n' "$*"; }
 wants_claude() { [ "$INSTALL_PROVIDER" = claude ] || [ "$INSTALL_PROVIDER" = both ] || [ "$INSTALL_PROVIDER" = all ]; }
 wants_codex() { [ "$INSTALL_PROVIDER" = codex ] || [ "$INSTALL_PROVIDER" = both ] || [ "$INSTALL_PROVIDER" = all ]; }
-wants_pi() { [ "$INSTALL_PROVIDER" = pi ] || [ "$INSTALL_PROVIDER" = all ]; }
 
 say "Installing Slack Agent Bridge ($INSTALL_PROVIDER) from $BRIDGE"
 
@@ -171,13 +170,11 @@ fi
 if wants_codex; then
   if command -v codex >/dev/null 2>&1; then say "  ✓ codex"; else say "  ✗ missing: codex"; missing=1; fi
 fi
-if wants_pi; then
-  if command -v pi >/dev/null 2>&1; then say "  ✓ pi"; else say "  ✗ missing: pi"; missing=1; fi
-fi
 [ -d /Applications/Ghostty.app ] || say "  ! Ghostty not found — sessions work headlessly, but terminal viewports need it (https://ghostty.org)"
 if [ "$missing" = 1 ]; then say "Install the missing prerequisites and re-run."; exit 1; fi
-NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-[ "$NODE_MAJOR" -ge 20 ] || { say "Node >= 20 required (have $(node -v))"; exit 1; }
+node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 12) ? 0 : 1)' || {
+  say "Node >= 22.12 required (have $(node -v))"; exit 1;
+}
 
 # ---- 2. dependencies and launchers -----------------------------------------
 if [ "${CCS_SKIP_DEPENDENCY_INSTALL:-0}" = 1 ]; then
@@ -335,9 +332,5 @@ if wants_claude; then say "   Start Claude locally: sab new claude"; fi
 if wants_codex; then
   say "   Before the first Codex session, run sab new codex and trust the user hook in /hooks."
   say "   Start Codex locally: sab new codex"
-fi
-if wants_pi; then
-  say "   Start Pi locally: sab new pi"
-  say "   Pi's SAB extension is loaded explicitly by sab; no global Pi extension is installed."
 fi
 say "   Logs: tail -f $LOG"

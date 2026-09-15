@@ -1,14 +1,29 @@
 # Slack Agent Bridge
 
-Control local [Claude Code](https://claude.com/claude-code),
-[Codex CLI](https://developers.openai.com/codex/cli/), and
-[Pi](https://github.com/earendil-works/pi) sessions from Slack. Each native
+This fork supports Claude Code and Codex only. Pi and its managed-run features have been removed.
+
+**For named Codex agents with Slack mentions and thread replies, use the [agent hub](docs/agent-hub.md): `npm run bridge`.**
+Create agents with `@Codex Agent new name`; address them by name or reply in
+their Slack thread. Tests live in `tests/direct/` and run with Vitest.
+
+**Current scope: one bridge computer and its Codex account.** Connecting other
+owners' computers to the shared Slack app is not implemented yet. See the
+[tester guide and next milestone](docs/tester-guide.md) before installing a
+second copy.
+
+The older [single-task direct mode](docs/direct-codex.md) is also available.
+It uses the existing Codex login and App Server over pipes, with no tmux or
+terminal UI. The broader terminal-based bridge described below remains the
+legacy mode; its team and file features have not yet moved to direct mode.
+
+Control local [Claude Code](https://claude.com/claude-code) and
+[Codex CLI](https://developers.openai.com/codex/cli/) sessions from Slack. Each native
 session gets a private Slack channel where prompts, responses, progress, and
 attachments flow both ways.
 
 Version 2 has one command language everywhere: `sab` in a shell and `/sab-*`
 in Slack. The active Slack channel selects its provider; only creation and
-provider switching need an explicit `claude`, `codex`, or `pi` target.
+provider switching need an explicit `claude` or `codex` target.
 
 Provider processes live in detached-capable tmux sessions. Ghostty is an
 optional viewport, not a process-lifetime requirement: close every terminal and
@@ -18,17 +33,14 @@ duplicating the native conversation.
 > [!WARNING]
 > **This is remote code execution by design.** Slack-spawned Claude sessions
 > default to `--dangerously-skip-permissions`; Slack-spawned Codex sessions
-> default to `--dangerously-bypass-approvals-and-sandbox` (`--yolo`). Pi's
-> built-in tools are unrestricted by default; SAB's optional `--safe` flag adds
-> fail-closed Slack approval per tool call. Anyone able to act as the bridge
+> default to `--dangerously-bypass-approvals-and-sandbox` (`--yolo`). Anyone able to act as the bridge
 > owner can steer processes with that Mac user's privileges. Read
 > [SECURITY.md](SECURITY.md) before installing.
 
 > [!NOTE]
 > The daemon currently targets macOS and launchd. Ghostty is needed only when
 > terminal viewports are wanted. Claude uses its Channels API; Codex uses hooks,
-> tmux, and a loopback App Server event proxy; Pi uses an explicitly loaded
-> native extension.
+> tmux, and a loopback App Server event proxy.
 
 > [!NOTE]
 > Multi-machine support is being built around one Slack-facing coordinator and
@@ -41,21 +53,20 @@ duplicating the native conversation.
 
 ## Capabilities
 
-| Capability | Claude Code | Codex CLI | Pi |
-|---|---:|---:|---:|
-| Private channel per native session | ✓ | ✓ | ✓ |
-| Slack prompts and attachments | ✓ | ✓ | ✓ |
-| Return generated files to Slack | ✓ | ✓ | ✓ |
-| Final responses and live working status | ✓ | ✓ | ✓ |
-| Selected interim progress | ✓ | ✓ | managed runs |
-| Model and effort controls | ✓ | ✓ | ✓ |
-| Remote permission decisions | ✓ | ✓ | `--safe` |
-| Token and cost usage | `ccusage` | `ccusage` | native ledger |
-| Provider handoff in one channel | ✓ | ✓ | ✓ |
-| Cross-session team delegation | ✓ | ✓ | ✓ |
-| Persistent plans, goals, and review | — | — | adaptive `/sab-run` |
-| Claude subscription switching | ✓ | — | — |
-| Chrome integration | `--chrome` | no counterpart | no counterpart |
+| Capability | Claude Code | Codex CLI |
+|---|---:|---:|
+| Private channel per native session | ✓ | ✓ |
+| Slack prompts and attachments | ✓ | ✓ |
+| Return generated files to Slack | ✓ | ✓ |
+| Final responses and live working status | ✓ | ✓ |
+| Selected interim progress | ✓ | ✓ |
+| Model and effort controls | ✓ | ✓ |
+| Remote permission decisions | ✓ | ✓ |
+| Token and cost usage | `ccusage` | `ccusage` |
+| Provider handoff in one channel | ✓ | ✓ |
+| Cross-session team delegation | ✓ | ✓ |
+| Claude subscription switching | ✓ | — |
+| Chrome integration | `--chrome` | no counterpart |
 
 While a turn runs, its status and elapsed timer remain the newest channel item.
 Daemon restarts re-adopt active turns and their original duration. Codex's
@@ -79,7 +90,7 @@ posts a warning while retaining the requested model/effort for the next
 restart. A native Codex change becomes the new durable selection only when the
 idle TUI renders its explicit `Model changed to …` confirmation; a plain footer
 mismatch is treated as a possible capacity fallback and never changes the next
-resume. Claude and Pi likewise resume with their latest known native
+resume. Claude likewise resume with their latest known native
 model/effort rather than their original launch values.
 If Codex omits `UserPromptSubmit`, SAB starts tracking a bridge-injected turn at
 the tmux boundary. If it also omits `Stop`, the correlated App Server
@@ -98,15 +109,14 @@ do not depend on an interactive development-channel confirmation. When Claude
 asks for workspace trust, SAB explicitly selects the affirmative row for the
 owner-requested directory instead of assuming Enter is safe.
 The bridge never parses Codex transcript JSONL. See
-[ARCHITECTURE.md](ARCHITECTURE.md), the provider feasibility notes under
-[`docs/`](docs/), and [Managed Pi runs](docs/pi-managed-runs.md).
+[ARCHITECTURE.md](ARCHITECTURE.md) and the provider feasibility notes under `docs/`.
 
 ## Prerequisites
 
 - macOS
 - Node.js 20 or later, `tmux`, `jq`, and `git`
 - Optional [Ghostty](https://ghostty.org) for terminal viewports
-- At least one configured Claude Code, Codex, or Pi CLI
+- At least one configured Claude Code or Codex CLI
 - A Slack workspace where you may create or update an app
 
 ```bash
@@ -115,20 +125,19 @@ brew install node tmux jq git
 
 ## Install
 
-Choose the provider set. A flagless install remains Claude-only for upgrades
+Run from the reviewed local fork checkout and choose the provider set. A flagless install remains Claude-only for upgrades
 from older releases.
 
 ```bash
 # Claude only
-curl -fsSL https://raw.githubusercontent.com/SergioTCG/SlackAgentBridge/main/install.sh | bash
+./install.sh
 
 # One provider
-curl -fsSL https://raw.githubusercontent.com/SergioTCG/SlackAgentBridge/main/install.sh | bash -s -- --provider codex
-curl -fsSL https://raw.githubusercontent.com/SergioTCG/SlackAgentBridge/main/install.sh | bash -s -- --provider pi
+./install.sh --provider codex
 
-# Claude + Codex, or all three
-curl -fsSL https://raw.githubusercontent.com/SergioTCG/SlackAgentBridge/main/install.sh | bash -s -- --provider both
-curl -fsSL https://raw.githubusercontent.com/SergioTCG/SlackAgentBridge/main/install.sh | bash -s -- --provider all
+# Claude + Codex (both and all are aliases)
+./install.sh --provider both
+./install.sh --provider all
 ```
 
 The installer opens a pre-filled Slack app page. Create the app, install it,
@@ -155,11 +164,8 @@ Fresh installs use `~/.slack-agent-bridge`. Existing
 historical `si.sergej.claudeslackproxy` LaunchAgent are retained. The installer
 removes old launcher symlinks and installs only `sab` on `PATH`.
 
-The staged `install-codex.sh` and `install-pi.sh` helpers can add provider
-support without restarting the live daemon. Activation still belongs in a
-controlled maintenance window. If a newly staged Pi extension meets an older
-daemon, model and effort changes fail closed with a restart-required message;
-they do not mutate an unverified native session. A staged activation must be
+`./install.sh --no-daemon-reload` stages support without restarting the live daemon.
+Activation still belongs in a controlled maintenance window. A staged activation must be
 run from the checkout already named by the live LaunchAgent; invoking it from
 an isolated development worktree fails before changing hooks, configuration,
 Git state, or the public `sab` link.
@@ -178,7 +184,6 @@ Start a provider session in the current directory:
 ```bash
 sab new claude --model opus --effort max --dsp --chrome
 sab new codex --model gpt-5.6-sol --config 'model_reasoning_effort="xhigh"' --yolo
-sab new pi --model qwen38-local/qwen3.8-27b --thinking xhigh
 ```
 
 Use another working directory with `--cwd DIR`. All later arguments are passed
@@ -244,17 +249,16 @@ A session channel always acts on its authoritative provider.
 
 | Command | Effect |
 |---|---|
-| `/sab-new <claude\|codex\|pi> [folder] [flags]` | Choose a provider/project interactively, or start a headless session directly |
+| `/sab-new <claude\|codex> [folder] [flags]` | Choose a provider/project interactively, or start a headless session directly |
 | `/sab-model [model]` | Choose or change this session's model |
 | `/sab-effort [level]` | Choose or change reasoning/thinking effort |
 | `/sab-flags [flags]` | Show or replace allowlisted launch flags |
 | `/sab-update [current\|all]` | Choose an update interactively, or update this/all eligible sessions directly |
 | `/sab-stop` | Interrupt the current turn without ending the session |
-| `/sab-switch <claude\|codex\|pi> [new]` | Hand this channel to another native provider leg |
+| `/sab-switch <claude\|codex> [new]` | Hand this channel to another native provider leg |
 | `/sab-kill [here\|session-id]` | End one exact provider process and keep its channel resumable |
-| `/sab-status [claude\|codex\|pi]` | Show this session plus controls, or filter the control-channel list |
+| `/sab-status [claude\|codex]` | Show this session plus controls, or filter the control-channel list |
 | `/sab-usage [provider] [days [n]\|models\|limits]` | Show provider usage |
-| `/sab-run …` | Control Pi adaptive routing and managed runs |
 | `/sab-account [name\|default]` | Show or change a Claude subscription |
 | `/sab-terminal [list\|open\|close\|open-all\|close-all]` | Manage optional viewports |
 | `/sab-team [create\|add\|status\|auto\|manual\|drain\|resume\|permissions\|remove\|close]` | Link SAB sessions for auditable delegation, bounded continuation, and queue control |
@@ -289,12 +293,6 @@ Broad update and team-close actions require Slack
 confirmation. These panels are only a presentation layer over the normal
 `/sab-*` dispatcher.
 
-Pi model and effort controls additionally require the running extension to
-advertise exact-session fencing. A Pi process preserved across a daemon upgrade
-may still contain the older extension; SAB refuses the mutation and asks for
-`/sab-update current` instead of assuming that process understands the new
-control protocol.
-
 ### App Home
 
 Open *Slack Agent Bridge* under Slack's Apps section for a persistent owner
@@ -312,7 +310,7 @@ actions.
 
 `/sab-update all` is the quiet-period maintenance sweep. It considers only the
 authoritative live session bound to each channel, skips any session with an
-active turn, question, permission, provider switch, managed Pi run, automation
+active turn, question, permission, provider switch, automation
 ownership, delegated worker task, or restart already in progress, and reports
 every skip or failure.
 Each represented provider CLI is updated once; every eligible native session is
@@ -342,9 +340,7 @@ setting is not added to stored or user-visible launch flags.
 Flagless `/sab-new claude` and `/sab-new codex` use the dangerous defaults
 described above. Explicit flags replace those defaults. Operator overrides
 remain available through the existing `CCS_NEW_FLAGS`, `CCS_RESUME_FLAGS`,
-`CCS_CODEX_NEW_FLAGS`, `CCS_CODEX_RESUME_FLAGS`, `CCS_PI_NEW_FLAGS`, and
-`CCS_PI_RESUME_FLAGS` settings. Pi's `--safe` controls tool approval; Pi's
-native `--approve` separately controls project-resource trust.
+`CCS_CODEX_NEW_FLAGS`, and `CCS_CODEX_RESUME_FLAGS` settings.
 
 ### Provider switching
 
@@ -443,14 +439,6 @@ See [Session teams](docs/session-teams.md) for the complete workflow, limits,
 recovery behavior, and file boundary. Initial relay is local-node only; the
 durable identities are compatible with the accepted multi-node protocol.
 
-### Managed Pi runs
-
-Owner prompts are adaptively routed by default. Use `/sab-run mode auto`,
-`always`, or `native`; `/sab-run direct <prompt>` bypasses routing once.
-`/sab-run [plan] <goal> [--minutes=N --turns=N --agents=N --reviews=N]` forces a
-bounded planner/worker/reviewer run. Status and control actions are
-`/sab-run status`, `approve`, `pause`, `continue`, and `cancel`.
-
 ### Script-facing automation
 
 Use the JSON-safe client instead of constructing curl payloads:
@@ -531,10 +519,10 @@ with the same Socket Mode token.
 Required validation is defined in [`AGENTS.md`](AGENTS.md). Releases use the
 [stability policy](docs/stability-policy.md) and complete
 [release checklist](docs/release-checklist.md). Live Slack,
-Ghostty, Claude, Codex, and Pi tests belong in a controlled maintenance window
+Ghostty, Claude and Codex tests belong in a controlled maintenance window
 or on a separate Slack app and token set.
 
 ## License
 
 [MIT](LICENSE). Slack Agent Bridge is not affiliated with Anthropic, OpenAI,
-Slack, or the Pi project.
+or Slack.

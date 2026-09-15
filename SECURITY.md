@@ -1,16 +1,31 @@
 # Security
 
+The named-agent hub requires configured private channel IDs and Slack user IDs.
+New agents start with read-only sandboxing and on-request approvals. Owners may
+share prompt access with configured collaborators; approvals and stopping remain
+owner-only. Mentions establish reply routes, and output stays within that exact
+Slack thread. Bot events, edits, unconfigured channels and users are ignored.
+Local users authorized to run this bridge use this computer's Codex account.
+See [agent hub](docs/agent-hub.md).
+
+Direct Codex mode is scoped to one configured Slack owner, private channel,
+and native task. It inherits that task's native sandbox and approval settings.
+Approval replies require an outstanding request for the exact bridge-owned
+turn. It does not forward history, tool output, or other tasks, and removes
+Slack credentials from its Codex subprocess environment. See
+[direct-mode boundaries](docs/direct-codex.md). The terminal-specific contracts
+below apply to the legacy daemon.
+
 ## Read this before installing
 
 Slack Agent Bridge is **remote code execution by design**. It connects a Slack
-workspace to Claude Code, Codex, and/or Pi processes running with the local
+workspace to Claude Code and/or Codex processes running with the local
 user's filesystem, network, developer credentials, and shell access.
 
 Flagless Slack spawns default to:
 
 - Claude Code: `--dangerously-skip-permissions`
 - Codex CLI: `--dangerously-bypass-approvals-and-sandbox` (`--yolo`)
-- Pi: unrestricted built-in tools (no extra dangerous-mode flag is needed)
 
 Explicit launch flags replace those defaults. In plain terms:
 
@@ -48,7 +63,7 @@ accounts, and the Mac user running the daemon.
   requires no internet-facing listener. The local hook/channel HTTP service
   binds to loopback on port `8877`; it must not be exposed through a proxy.
 - **Restricted spawning:** Slack-created working directories must resolve under
-  `$HOME`. Claude, Codex, and Pi use separate remote-flag allowlists.
+  `$HOME`. Claude and Codex use separate remote-flag allowlists.
 - **Loopback automation ownership:** the automation lifecycle API listens only
   on `127.0.0.1:8877`; possession of the local macOS account is its trust
   boundary. It rejects non-loopback Host values, browser Origin/fetch metadata,
@@ -209,33 +224,6 @@ accounts, and the Mac user running the daemon.
   final retry path.
   Private transition finals resolve only their exact waiter and never enter
   Slack.
-- **Explicit Pi extension loading:** the bridge extension is loaded by
-  `sab new pi` from the checked-out release and is not installed globally or into a
-  project. Its inbound stream and permission endpoints require matching Pi
-  process, tmux, session, provider, and active/provisional lineage claims.
-- **Fail-closed Pi safe mode:** SAB `--safe` blocks a Pi tool call unless the
-  owner approves it. Relay loss, timeout, malformed responses, and identity
-  failures deny the call. This safety mode is distinct from Pi `--approve`,
-  which trusts project-local settings, extensions, skills, and packages and may
-  itself authorize code running with the macOS user's privileges.
-- **Isolated adaptive routing:** ordinary owner prompts default to a no-tools,
-  low-thinking child that receives only visible prompt text. Upload grants,
-  attachment bytes, bridge/tmux identity, extensions, session state, skills,
-  themes, project approval, and bridge/Slack/other-agent environment are
-  withheld. Pi provider credentials may still be required to invoke the
-  selected model.
-  Classifier failure or ambiguity promotes to managed execution; collaborators
-  never trigger it. `/sab-run mode native` disables classification for the
-  session and `/sab-run direct` bypasses it once.
-- **Bounded managed Pi runs:** automatic promotion and `/sab-run` are owner-only;
-  managed runs carry explicit
-  wall-clock, parent-turn, subagent, and review-cycle limits. Planner, scout,
-  and reviewer children receive only read/search tools. Child processes have
-  bridge/tmux/upload identity and Slack/other-agent environment removed. They
-  load no session, extensions, skills, prompt templates, themes, or project
-  approvals. Worker children are disabled
-  under `--safe`, because their writes cannot traverse the parent's interactive
-  Slack approval gate.
 - **Local secrets:** Slack tokens and account credentials stay under
   `~/.config/ccs` with restrictive permissions and are ignored by Git.
 - **Conservative self-update:** the updater fast-forwards only a clean checkout
@@ -263,14 +251,7 @@ accounts, and the Mac user running the daemon.
   catalog, and normal command gates. A stale, rebound, switched, or
   cross-channel control reports an error and performs no mutation. Model and
   effort values are validated again at action time; broad update and team-close
-  actions require Slack confirmation. Pi model/effort controls also carry the
-  expected native session into the extension, which rejects the control before
-  mutation if Pi has changed conversations. The daemon first requires the live
-  Pi stream to advertise that exact-session capability, so a preserved legacy
-  extension cannot silently ignore the fence after a daemon-only rollout. A
-  staged extension likewise rejects a mutable control from an older daemon that
-  cannot provide the identity. Both mixed-version directions fail closed with
-  an explicit activation instruction. Once any provider maintenance restart is
+  actions require Slack confirmation. Once any provider maintenance restart is
   reserved, overlapping lifecycle or setting mutations are rejected while owner
   prompts queue and status, usage, and terminal-view operations remain available.
   A verified native identity replacement carries the queue and fences forward;
@@ -335,9 +316,7 @@ Slack when its scope or progress is no longer appropriate.
 - Supply explicit safer approval/sandbox flags instead of the dangerous default
   when unattended execution is unnecessary.
 - Override remote defaults through `CCS_NEW_FLAGS`, `CCS_RESUME_FLAGS`,
-  `CCS_CODEX_NEW_FLAGS`, `CCS_CODEX_RESUME_FLAGS`, `CCS_PI_NEW_FLAGS`, and
-  `CCS_PI_RESUME_FLAGS`. Use SAB `--safe` when Pi tool calls should require
-  Slack approval.
+  `CCS_CODEX_NEW_FLAGS`, and `CCS_CODEX_RESUME_FLAGS`.
 - Review changes to the runner, hooks, the Slack manifest, and dependencies before
   enabling self-update on a security-sensitive host.
 - Regularly inspect private-channel membership and collaborator allowlists.
@@ -409,7 +388,7 @@ message, reply, and result records according to workspace retention. Do not
 delegate secrets merely because both sessions run on the same machine.
 
 Coordinator-to-worker messages are journaled before provider delivery. A
-provable pre-write rejection, such as a disconnected Pi input stream, may be
+provable pre-write rejection, may be
 retried against the same exact task/session authority. Once a provider write is
 attempted and its result is uncertain, SAB fails closed and never replays it.
 Messages for one task are submitted in durable acceptance order, and an
@@ -435,11 +414,6 @@ and the bridge deliberately avoids transcript JSONL. App Server's WebSocket
 transport is documented as experimental, so controlled Codex message, resume,
 permission, commentary, and fallback canaries are required after upgrades.
 
-Pi support uses its native extension API. The bridge deliberately avoids Pi
-session JSONL, but the extension surface and trust semantics may evolve. The
-release extension-loading and controlled Slack canaries are mandatory after a
-Pi upgrade.
-
 ## Incident response
 
 If the bridge may be compromised:
@@ -451,7 +425,7 @@ If the bridge may be compromised:
    ```
 
 2. Revoke the Slack app-level and bot tokens in Slack immediately.
-3. Revoke or rotate affected Claude, Codex, Pi/provider, Git, cloud, and local credentials.
+3. Revoke or rotate affected Claude, Codex, Git, cloud, and local credentials.
 4. Inspect Slack channel history, daemon logs, provider transcripts, Git changes,
    running processes, and shell history from a trusted environment.
 5. Reinstall from a verified release before issuing replacement tokens.

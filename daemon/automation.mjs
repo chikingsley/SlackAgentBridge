@@ -42,7 +42,7 @@ export function validateAutomationRequest(input, { home = process.env.HOME } = {
   if (!input || typeof input !== 'object' || Array.isArray(input)) requestError('invalid_request', 'request body must be a JSON object')
   const externalKey = validateExternalKey(input.externalKey)
   const provider = typeof input.provider === 'string' ? normalizeProvider(input.provider, '') : null
-  if (!provider) requestError('unknown_provider', 'provider must be claude, codex, or pi')
+  if (!provider) requestError('unknown_provider', 'provider must be claude or codex')
 
   if (typeof input.cwd !== 'string' || !input.cwd || input.cwd.includes('\0')) requestError('invalid_cwd', 'cwd is required')
   const requestedCwd = path.resolve(input.cwd.replace(/^~/, home))
@@ -102,21 +102,9 @@ export function shouldFenceAutomationHook(record, tmux) {
 export async function waitForProviderInput(session, {
   isProcessAlive,
   isTmuxAlive,
-  piStream,
-  sleep,
-  attempts = 60,
-  intervalMs = 500,
 }) {
   if (!(session?.pid && isProcessAlive(session.pid))) throw new Error('the correlated provider process is not alive')
   if (!session.tmux || !(await isTmuxAlive(session.tmux))) throw new Error('the correlated tmux session is not alive')
-  if (providerOf(session) !== 'pi') return
-  for (let i = 0; i < attempts; i++) {
-    const stream = piStream(session.pid)
-    if (stream?.provider === 'pi' && !stream.res.writableEnded && !stream.res.destroyed) return
-    if (!isProcessAlive(session.pid)) throw new Error('the correlated Pi process exited before its input stream connected')
-    await sleep(intervalMs)
-  }
-  throw new Error('the authenticated Pi input stream did not connect before the readiness deadline')
 }
 
 function publicStatus(record) {

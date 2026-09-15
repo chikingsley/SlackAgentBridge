@@ -19,13 +19,12 @@ export function bulkUpdateBlockReason(session, {
 } = {}) {
   if (transitionChannels.has(session.channel)) return 'provider switch in progress'
   if (session.teamActiveTaskId) return 'delegated team task in progress'
-  if (['active', 'paused'].includes(session.managed?.status) || session.piRouting?.status === 'routing') return 'managed Pi work in progress'
   if (ownsAutomation(session, automations)) return 'automation-owned session'
   if (questionSessionIds.has(session.id)) return 'question awaiting an answer'
   if (pendingPermissionChannels.has(session.channel)) return 'permission awaiting a decision'
   if (internalSessionIds.has(session.id)) return 'private maintenance turn in progress'
   if (restartingSessionIds.has(session.id) || wakingSessionIds.has(session.id)) return 'session already restarting'
-  if (busySessionIds.has(session.id) || session.codexTurnStartedAt || session.piTurnStartedAt) return 'turn in progress'
+  if (busySessionIds.has(session.id) || session.codexTurnStartedAt) return 'turn in progress'
   return null
 }
 

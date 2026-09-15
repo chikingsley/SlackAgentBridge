@@ -7,11 +7,11 @@ const BASE = String(process.env.SAB_AUTOMATION_URL || 'http://127.0.0.1:8877').r
 function usage(message = '') {
   if (message) process.stderr.write(`sab automation: ${message}\n`)
   process.stderr.write(`Usage:
-  sab automation create --external-key KEY --cwd DIR --provider claude|codex|pi \\
+  sab automation create --external-key KEY --cwd DIR --provider claude|codex \\
     [--collaborator USER_ID ...] --prompt-file FILE|- -- [PROVIDER_FLAGS...]
   sab automation status EXTERNAL_KEY
   sab automation stop EXTERNAL_KEY [--archive]
-  sab automation validate-flags --provider claude|codex|pi -- [PROVIDER_FLAGS...]
+  sab automation validate-flags --provider claude|codex -- [PROVIDER_FLAGS...]
 
 The prompt is read from a file (or stdin with -), then encoded as JSON without
 shell interpolation. SAB_AUTOMATION_URL may override the loopback base URL.\n`)
@@ -59,7 +59,7 @@ if (command === 'validate-flags') {
     usage(`unknown validate-flags option: ${arg}`)
   }
   provider = normalizeProvider(provider, '')
-  if (!provider) usage('validate-flags requires --provider claude|codex|pi')
+  if (!provider) usage('validate-flags requires --provider claude|codex')
   try {
     process.stdout.write(`${JSON.stringify({ ok: true, provider, flags: normalizeRemoteLaunchFlags(provider, flags) })}\n`)
   } catch (error) {

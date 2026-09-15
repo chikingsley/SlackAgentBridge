@@ -51,7 +51,7 @@ async function request(pathname, { method = 'GET', body, timeout = 30_000 } = {}
     response = await fetch(`${BASE}${pathname}${pathname.includes('?') ? '&' : '?'}${query()}`, {
       method,
       headers: {
-        'x-ccs-provider': ['codex', 'pi'].includes(process.env.CCS_PROVIDER) ? process.env.CCS_PROVIDER : 'claude',
+        'x-ccs-provider': ['codex'].includes(process.env.CCS_PROVIDER) ? process.env.CCS_PROVIDER : 'claude',
         ...(body === undefined ? {} : { 'content-type': 'application/json' }),
       },
       body: body === undefined ? undefined : JSON.stringify(body),

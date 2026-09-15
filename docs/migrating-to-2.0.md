@@ -7,7 +7,7 @@ command-interface release, not a state reset.
 ## What changes
 
 - `sab` is the only public local executable.
-- Start providers with `sab new claude`, `sab new codex`, or `sab new pi`.
+- Start providers with `sab new claude`, `sab new codex`.
 - Accounts, artifacts, automation, and terminals are `sab account`,
   `sab upload`, `sab team`, `sab automation`, and `sab terminal`.
 - Slack uses only `/sab-*`. The provider comes from the active session channel;
@@ -64,7 +64,7 @@ manifest.
    automation launch is in its transactional phase.
 6. Roll the one historical LaunchAgent. Do not start another daemon with the
    same Socket Mode token.
-7. Run the controlled canary for existing and new Claude, Codex, and Pi
+7. Run the controlled canary for existing and new Claude and Codex
    sessions, including terminal open/close and headless Slack messaging.
 8. Keep the previous tag and backup until acceptance.
 
@@ -82,7 +82,6 @@ closing them no longer ends their providers.
 | provider-specific model/effort/flags/update/stop/status/usage/kill/help | matching `/sab-*` command in that session channel |
 | update every idle active provider session | `/sab-update all` from the control channel or any session channel |
 | provider-specific switch | `/sab-switch <target>` |
-| Pi managed-run command | `/sab-run` |
 | Claude account command | `sab account` / `/sab-account` |
 | artifact helper | `sab upload` |
 | automation helper | `sab automation` |

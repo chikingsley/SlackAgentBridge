@@ -3,7 +3,7 @@
 set -euo pipefail
 
 provider="${1:-}"
-case "$provider" in claude|codex|pi) shift ;; *) echo "sab: invalid provider" >&2; exit 2 ;; esac
+case "$provider" in claude|codex) shift ;; *) echo "sab: invalid provider" >&2; exit 2 ;; esac
 
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do
@@ -35,7 +35,6 @@ command -v tmux >/dev/null 2>&1 || PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 case "$provider" in
   claude) command -v claude >/dev/null 2>&1 || PATH="$HOME/.local/bin:$PATH" ;;
   codex) command -v codex >/dev/null 2>&1 || PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH" ;;
-  pi) command -v pi >/dev/null 2>&1 || PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH" ;;
 esac
 
 export CCS_BRIDGE=1
@@ -192,25 +191,8 @@ run_codex() {
   codex --remote "$proxy_url" "${codex_tui_args[@]}" "${remote_args[@]}"
 }
 
-run_pi() {
-  extension="$BRIDGE/pi/sab-extension.ts"
-  [ -f "$extension" ] || { echo "sab: Pi bridge extension is missing: $extension" >&2; exit 1; }
-  export CCS_PI_SAFE=""
-  pi_args=()
-  for arg in "$@"; do
-    if [ "$arg" = "--safe" ]; then
-      export CCS_PI_SAFE=1
-    elif [[ "$arg" == --model=* || "$arg" == --thinking=* || "$arg" == --provider=* ]]; then
-      pi_args+=("${arg%%=*}" "${arg#*=}")
-    else
-      pi_args+=("$arg")
-    fi
-  done
-  exec pi --extension "$extension" "${pi_args[@]}"
-}
 
 case "$provider" in
   claude) run_claude "$@" ;;
   codex) run_codex "$@" ;;
-  pi) run_pi "$@" ;;
 esac

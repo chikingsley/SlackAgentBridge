@@ -13,7 +13,7 @@ BRIDGE="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
 usage() {
   cat <<'EOF'
 Usage:
-  sab new <claude|codex|pi> [--cwd DIR] [PROVIDER_FLAGS...]
+  sab new <claude|codex> [--cwd DIR] [PROVIDER_FLAGS...]
   sab terminal list [--json]
   sab terminal open <session|tmux|here>
   sab terminal close <session|tmux|here>
@@ -32,7 +32,7 @@ command_name="${1:-help}"
 case "$command_name" in
   new)
     provider="${1:-}"
-    case "$provider" in claude|codex|pi) shift ;; *) echo "sab: new requires claude, codex, or pi" >&2; exit 2 ;; esac
+    case "$provider" in claude|codex) shift ;; *) echo "sab: new requires claude or codex" >&2; exit 2 ;; esac
     cwd="$PWD"
     if [ "${1:-}" = "--cwd" ]; then
       [ "$#" -ge 2 ] || { echo "sab: --cwd requires a directory" >&2; exit 2; }
@@ -65,7 +65,7 @@ case "$command_name" in
   __run)
     # Private daemon/tmux entry point. It is intentionally absent from help.
     provider="${1:-}"
-    case "$provider" in claude|codex|pi) shift ;; *) echo "sab: invalid internal provider" >&2; exit 2 ;; esac
+    case "$provider" in claude|codex) shift ;; *) echo "sab: invalid internal provider" >&2; exit 2 ;; esac
     exec "$BRIDGE/scripts/run-session.sh" "$provider" "$@"
     ;;
   help|-h|--help)

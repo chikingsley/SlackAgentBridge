@@ -14,17 +14,7 @@ import {
   tmuxClientPids, openTmuxTerminal, closeTmuxTerminal,
 } from './util.mjs'
 import { enqueue, mdToMessages, reportSlashFailure, unescapeSlack, escapeText } from './slackout.mjs'
-import {
-  CODEX_DANGEROUS_FLAG, CODEX_EFFORTS, PI_EFFORTS, PROVIDERS, acceptHookSettings, allowedFlags,
-  claudeModelPickerOptions,
-  codexFlagsWithoutInitialPrompt, codexModelFromArgs, codexPermissionDecision, codexStatusRecoveryDecision,
-  defaultNewFlagsFor, displayFlagsFor, executableCacheKey,
-  isPathWithin, isSupersededHook, normalizeLaunchFlag, normalizeProvider, normalizeRemoteLaunchFlags,
-  parsePiStreamCapabilities, parseSlackCommand, piMutableControlAllowed,
-  providerCommand, providerLabel, providerOf, resolveCodexEffort, resumeArgsFor, slackCommand,
-  submitTargetValidation, switchActionBlocks, switchTargetLaunch, targetStartupState, waitForTargetSessionClaim,
-  waitForCodexInterrupt,
-} from './providers.mjs'
+import { CODEX_DANGEROUS_FLAG, CODEX_EFFORTS, PROVIDERS, acceptHookSettings, allowedFlags, claudeModelPickerOptions, codexFlagsWithoutInitialPrompt, codexModelFromArgs, codexPermissionDecision, codexStatusRecoveryDecision, defaultNewFlagsFor, displayFlagsFor, executableCacheKey, isPathWithin, isSupersededHook, normalizeLaunchFlag, normalizeProvider, normalizeRemoteLaunchFlags, parseSlackCommand, providerCommand, providerLabel, providerOf, resolveCodexEffort, resumeArgsFor, slackCommand, submitTargetValidation, switchActionBlocks, switchTargetLaunch, targetStartupState, waitForTargetSessionClaim, waitForCodexInterrupt } from './providers.mjs'
 import { CONTROL_CHANNEL_NAME, findControlChannel, prunePermissionsOnBoot } from './identity.mjs'
 import { createSessionChannelGate, pruneSessionChannelAliases } from './channel-binding.mjs'
 import { createTopicSync } from './topic.mjs'
@@ -45,10 +35,7 @@ import {
   ArtifactUploadError, artifactDeliveryInstruction, artifactGrantTokensFromPrompts,
   createArtifactGrantStore, fulfillArtifactUpload, slackArtifactUploadOptions,
 } from './artifacts.mjs'
-import {
-  codexProjectUsage, codexSessionUsage, codexTokenSnapshot, formatCodexWorkingStatus,
-  formatPiWorkingStatus, formatTokens, normalizePiUsage, piUsageRows, usageCost, usageDate, usageRows,
-} from './usage.mjs'
+import { codexProjectUsage, codexSessionUsage, codexTokenSnapshot, formatCodexWorkingStatus, formatTokens, usageCost, usageDate, usageRows } from './usage.mjs'
 import {
   beginTransition, commitTransition, defaultSwitchTarget, deleteLineage, enqueueTransitionItem, ensureLineage, lineageFor,
   rebindLineageSession, recoveryDecision, rollbackTransition, setTransitionPhase, transitionForSession, transitionForTarget,
@@ -57,9 +44,7 @@ import {
 import {
   deleteHandoffs, handoffPrompt, readHandoff, targetBootstrapPrompt, validateBootstrapReply, writeHandoff,
 } from './handoffs.mjs'
-import {
-  normalizeManagedPolicy, parseManagedRunCommand, sanitizeManagedSnapshot, sanitizeRoutingSnapshot,
-} from '../pi/managed-core.mjs'
+
 import {
   CLAUDE_FAILURE_DEDUPE_MS, claudePollerDecision, prepareClaudeTerminalDelivery,
   resetClaudePollerEvidence,
@@ -274,8 +259,8 @@ process.on('uncaughtException', e => log('uncaughtException:', e?.stack || Strin
 
 // pid → { res } live SSE connections from channel servers
 const streams = new Map()
-const piControlWaiters = new Map() // request id → bounded settings/status command resolver
-const pendingSpawnChannels = new Map() // tmux → Slack channel that requested a not-yet-registered Pi spawn
+ // request id → bounded settings/status command resolver
+const pendingSpawnChannels = new Map() // tmux → Slack channel that requested a not-yet-registered spawn
 
 // sid → texts injected from Slack, awaiting their UserPromptSubmit echo (dedup)
 const injectedRecently = new Map()
@@ -342,14 +327,8 @@ async function codexVersion() {
     return out.match(/\b\d+\.\d+\.\d+\b/)?.[0] || out || '?'
   } catch { return '?' }
 }
-function piBin() {
-  const homebrew = '/opt/homebrew/bin/pi'
-  return fs.existsSync(homebrew) ? homebrew : 'pi'
-}
-async function piVersion() {
-  try { return (await execFile(piBin(), ['--version'])).stdout.trim() || '?' } catch { return '?' }
-}
-const agentVersion = provider => provider === 'codex' ? codexVersion() : provider === 'pi' ? piVersion() : claudeVersion()
+
+const agentVersion = provider => provider === 'codex' ? codexVersion() : (claudeVersion())
 let modelCache = { key: null, list: [] }
 async function getModels() {
   const bin = claudeBin()
@@ -1084,42 +1063,11 @@ function codexFinalAlreadyClaimed(session, turnId) {
     codexFinalDeliveries.has(`${session.id}\u0000${nativeId}`)
 }
 
-const piPollers = new Map()
-function startPiPoller(session) {
-  if (piPollers.has(session.id)) return
-  const p = { timer: null, stopped: false, last: '' }
-  const tick = async () => {
-    if (p.stopped || !(session.pid && pidAlive(session.pid))) return
-    const text = formatPiWorkingStatus({
-      startedAt: session.managed?.status === 'active' ? session.managed.startedAt
-        : session.piRouting?.status === 'routing' ? session.piRouting.startedAt
-          : session.piTurnStartedAt,
-      usage: normalizePiUsage(session.piTurnUsage, session.piContextUsage),
-      managed: session.managed?.status === 'active' ? session.managed : null,
-      routing: session.piRouting?.status === 'routing' ? session.piRouting : null,
-    })
-    if (text !== p.last) { p.last = text; await setStatus(session, text) }
-  }
-  p.timer = setInterval(() => tick().catch(error => log('Pi status poller error', String(error))), 3000)
-  piPollers.set(session.id, p)
-  tick().catch(error => log('Pi status poller error', String(error)))
-}
-
-function beginPiTurn(session) {
-  stopPoller(session)
-  session.piTurnStartedAt = Date.now()
-  session.piTurnUsage = null
-  saveState(state)
-  startPiPoller(session)
-}
-
 function stopPoller(session, { preserveCodexTurn = false } = {}) {
   const p = pollers.get(session.id)
   if (p) { p.stopped = true; clearInterval(p.timer); pollers.delete(session.id) }
   const codex = codexPollers.get(session.id)
   if (codex) { codex.stopped = true; clearInterval(codex.timer); codexPollers.delete(session.id) }
-  const pi = piPollers.get(session.id)
-  if (pi) { pi.stopped = true; clearInterval(pi.timer); piPollers.delete(session.id) }
   if (!preserveCodexTurn && (session.codexTurnStartedAt || session.codexUsageBaseline ||
       session.codexTurnId || session.codexTurnAwaitingPromptHook)) {
     delete session.codexTurnStartedAt
@@ -1128,10 +1076,7 @@ function stopPoller(session, { preserveCodexTurn = false } = {}) {
     delete session.codexTurnAwaitingPromptHook
     saveState(state)
   }
-  if (session.piTurnStartedAt) {
-    delete session.piTurnStartedAt
-    saveState(state)
-  }
+
 }
 const hasPendingPerm = session => Object.values(state.perms).some(p => p.channel === session.channel)
 
@@ -1254,8 +1199,6 @@ async function flushDeferredTeamProviderFinal(session, expected = null) {
     let finalized = false
     if (deferred.provider === 'codex') {
       finalized = await finalizeCodexTurn(session, body, taskTurn, { deferredFinal: deferred })
-    } else if (deferred.provider === 'pi') {
-      finalized = await finalizePiTurn(session, body, taskTurn, { deferredFinal: deferred })
     } else {
       finalized = await finalizeTurn(session, {
         teamTaskTurn: taskTurn, deferredFinal: deferred, observedAt: deferred.observedAt,
@@ -1529,83 +1472,6 @@ async function finalizeCodexTerminalFailure(session, failure, expectedStartedAt,
   return true
 }
 
-async function finalizePiTurn(session, body, teamTaskTurn = currentTeamTaskProviderTurn(session), { deferredFinal = matchingDeferredTeamProviderFinal(session, 'pi', teamTaskTurn, body) } = {}) {
-  const turnId = body.turn_id || null
-  if (turnId && session.lastMirroredTurn === turnId) {
-    if (deferredFinal) clearSettledDeferredTeamProviderFinal(session, deferredFinal)
-    return Boolean(deferredFinal)
-  }
-  const expectedStartedAt = session.piTurnStartedAt || null
-  const observedAt = Number(body.observed_at) || null
-  const reportObservedAt = observedAt || Date.now()
-  const stillCurrent = ({ afterStop = false } = {}) =>
-    teamTaskTurnOwnsCurrentLifecycle(session, teamTaskTurn) &&
-    (!expectedStartedAt || !observedAt || observedAt >= expectedStartedAt) &&
-    (afterStop ? !session.piTurnStartedAt : session.piTurnStartedAt === expectedStartedAt)
-  if (!stillCurrent()) {
-    log('ignored stale Pi final before lifecycle mutation', session.id.slice(0, 8), turnId)
-    return false
-  }
-  const deferredSettlement = deferredFinal
-    ? claimDeferredTeamProviderFinal(session, deferredFinal)
-    : null
-  if (deferredSettlement && !deferredSettlement.recovered) saveStateNow(state)
-  const recoveringDeferredOutput = Boolean(deferredSettlement?.recovered)
-  stopPoller(session)
-  clearStatusDeferred(session)
-  const text = String(body.last_assistant_message || '').trim()
-  try {
-    if (text && session.channel && !recoveringDeferredOutput) {
-      await postProviderOutput(session.channel, text)
-    }
-  } catch (error) {
-    if (deferredSettlement && !deferredSettlement.recovered) {
-      releaseDeferredTeamProviderFinalClaim(session, deferredFinal)
-      saveStateNow(state)
-    }
-    throw error
-  }
-  // Slack delivery yields. A follow-up may have started a newer Pi turn; its
-  // poller, timestamps, usage, and task generation must survive the older final.
-  if (!stillCurrent({ afterStop: true })) {
-    log('ignored stale Pi final after Slack delivery', session.id.slice(0, 8), turnId)
-    clearSettledDeferredTeamProviderFinal(session, deferredFinal)
-    return false
-  }
-  const finalizedTask = await finishTeamTaskForSession(session, text, null, {
-    expectedTeamTaskTurn: teamTaskTurn,
-    observedAt: reportObservedAt,
-    reportKey: turnId ? `pi:${turnId}` : `pi-start:${expectedStartedAt || observedAt}`,
-  })
-  if (session.piTurnStartedAt || (teamTaskTurn && !finalizedTask)) {
-    if (session.piTurnStartedAt || !teamTaskTurnOwnsCurrentLifecycle(session, teamTaskTurn)) {
-      clearSettledDeferredTeamProviderFinal(session, deferredFinal)
-    } else {
-      saveStateNow(state)
-    }
-    return false
-  }
-  clearTeamInputReservation(session)
-  recordPiUsage(session, body)
-  if (turnId) session.lastMirroredTurn = turnId
-  if (deferredFinal) clearDeferredTeamProviderFinal(session, deferredFinal)
-  saveStateNow(state)
-  return true
-}
-
-function recordPiUsage(session, body) {
-  const usage = normalizePiUsage(body.usage, body.context_usage)
-  if (usage) {
-    session.piUsage = usage
-    state.piUsage ||= []
-    state.piUsage.push({
-      at: Date.now(), sessionId: session.id, cwd: session.cwd,
-      model: session.model || 'unknown', ...usage,
-    })
-    if (state.piUsage.length > 10000) state.piUsage.splice(0, state.piUsage.length - 10000)
-  }
-}
-
 // Recover live status after a daemon restart. The poller and each status
 // message's ts live only in memory, so a restart mid-turn freezes the status —
 // the daemon can neither update it nor, on Stop, clear it. On boot we re-adopt:
@@ -1646,23 +1512,7 @@ async function readoptStatus() {
         deferred.taskId, deferred.providerWorkGeneration)
       continue
     }
-    if (providerOf(s) === 'pi') {
-      const { statusMessage } = await findStatusContext(s.channel)
-      const ts = statusMessage?.ts || null
-      if (s.piTurnStartedAt) {
-        if (ts) liveStatuses.adopt(s.id, ts)
-        // A persisted start timestamp proves only that Pi was active before the
-        // daemon stopped. Wait for a new native Status/AgentStart event before
-        // restoring the poller or worker proof; an idle Pi emits neither and
-        // must fail closed rather than remain busy forever.
-        log('awaiting post-restart Pi activity proof', s.id.slice(0, 8), ts ? '(status adopted)' : '')
-      } else {
-        const idleTask = readoptedTeamTaskFingerprint(s)
-        if (ts) { try { await web.chat.delete({ channel: s.channel, ts }) } catch {} }
-        if (idleTask) await releaseIdleReadoptedTeamTaskIfStillIdle(s, idleTask, 'Pi')
-      }
-      continue
-    }
+
     if (providerOf(s) === 'codex') {
       const context = await findStatusContext(s.channel)
       const ts = context.statusMessage?.ts || null
@@ -1840,9 +1690,9 @@ async function privateAssistantText(session, body = {}) {
   stopPoller(session)
   clearStatusDeferred(session)
   void clearQuestionForm(session).catch(error => log('deferred question clear error', String(error?.message || error)))
-  if (providerOf(session) === 'codex' || providerOf(session) === 'pi') {
+  if ((providerOf(session) === 'codex')) {
     const turnId = body.turn_id || null
-    if (providerOf(session) === 'pi') recordPiUsage(session, body)
+
     if (turnId) session.lastMirroredTurn = turnId
     return String(body.last_assistant_message || '').trim()
   }
@@ -1954,16 +1804,12 @@ async function reportCodexModelMismatch(session) {
 }
 
 // All accepted input which had to wait for a provider surface enters this one
-// ordered drain. SessionStart schedules the normal fallback; a Pi stream
-// reconnect can ask the same drain to start immediately. Neither caller reads
-// or mutates the queue itself.
+// Ordered drain after SessionStart.
+
 function scheduleSessionInputDrain(session, provider, tmux, delay = 2000) {
   if (!session?.id || !tmux ||
       (!updatingSessions.has(session.id) && !pendingBySid.get(session.id)?.length)) return false
-  // SessionStart and the Pi stream can race, and the native session id may be
-  // replaced while the first delivery is awaiting tmux/provider I/O. Reserve
-  // the stable record synchronously so neither surface can start a second queue
-  // consumer under the replacement id.
+
   if (sessionInputDrainOwners.has(session)) return false
   sessionInputDrainOwners.add(session)
   const fenceOwner = ensureSessionInputFence(session.id)
@@ -1983,9 +1829,7 @@ function scheduleSessionInputDrain(session, provider, tmux, delay = 2000) {
           const prompt = queuedPromptText(m)
           rememberInjected(currentSid, prompt)
           try {
-            if (provider === 'pi') {
-              if (!injectQueuedPiPrompt(session.pid, m)) throw new Error('Pi input stream is unavailable')
-            } else {
+            {
               if (session.tmux !== tmux || !(await tmuxAlive(tmux))) {
                 throw new Error('replacement tmux is no longer authoritative')
               }
@@ -2039,8 +1883,7 @@ async function completeAuthoritativeSessionStart(session, provider, source) {
     automationLifecycle.correlateSessionStart(session)
 
     // Publish completion only after every awaited metadata operation succeeds.
-    // A Pi stream may attach while this handler is still running, but it must
-    // not deliver preserved input until this exact startup is fully accepted.
+
     if (session.id !== sid || session.tmux !== tmux || state.sessions?.[sid] !== session) {
       throw new Error('session identity changed while startup metadata was being completed')
     }
@@ -2121,10 +1964,7 @@ async function processHook(body, ppid, tmux, flags, account, requestedProvider =
   }
 
   let session = state.sessions[sid] || sessionByPid(pid)
-  if (!session && provider === 'pi' && ev !== 'SessionStart') {
-    log('ignored pre-start Pi event', ev, String(sid).slice(0, 8))
-    return
-  }
+
   if (session && isSupersededHook(ev, session.pid, pid)) {
     log('ignored hook from superseded pid', ev, pid, 'current', session.pid, String(sid).slice(0, 8))
     return
@@ -2133,10 +1973,7 @@ async function processHook(body, ppid, tmux, flags, account, requestedProvider =
     log('rejected cross-provider session collision', String(sid).slice(0, 8), provider)
     return
   }
-  if (session && provider === 'pi' && restarting.has(sid) && ev !== 'SessionStart') {
-    log('ignored trailing Pi event during restart', ev, String(sid).slice(0, 8))
-    return
-  }
+
   if (!session) {
     // Claude Code 2.1.220+ spawns internal background workers — a transient
     // per-user daemon, warm "spare" sessions, and background agents — which
@@ -2220,24 +2057,7 @@ async function processHook(body, ppid, tmux, flags, account, requestedProvider =
     session.model = body.model
     sessionMeta.set(session.id, { ...(sessionMeta.get(session.id) || {}), model: body.model })
   }
-  const previousManagedId = session.managed?.id || null
-  if (provider === 'pi') {
-    if (body.model) session.model = body.model
-    if (body.model_name) session.modelName = body.model_name
-    if (Array.isArray(body.model_input)) session.modelInput = body.model_input
-    if (body.effort) session.effort = body.effort
-    if (body.context_usage) session.piContextUsage = body.context_usage
-    if (body.usage) session.piTurnUsage = body.usage
-    if (body.managed !== undefined) session.managed = sanitizeManagedSnapshot(body.managed)
-    if (body.managed_policy !== undefined) session.managedPolicy = normalizeManagedPolicy(body.managed_policy)
-    if (body.routing !== undefined) session.piRouting = sanitizeRoutingSnapshot(body.routing)
-    sessionMeta.set(session.id, {
-      ...(sessionMeta.get(session.id) || {}),
-      model: session.modelName || session.model,
-      effort: session.effort,
-      ctxPct: body.context_usage?.percent,
-    })
-  }
+
   // During a bridge-initiated restart, the old process may emit trailing hooks
   // after the desired settings were persisted. Never let one roll them back;
   // the replacement SessionStart is allowed to confirm its actual launch values.
@@ -2276,141 +2096,6 @@ async function processHook(body, ppid, tmux, flags, account, requestedProvider =
   if (provider === 'codex' && body.model && session.channel && !targetClaim && ev !== 'SessionStart') {
     await reportCodexModelMismatch(session).catch(error =>
       log('Codex model mismatch notice failed', session.id.slice(0, 8), String(error?.message || error)))
-  }
-
-  if (provider === 'pi' && ev === 'ControlResult') {
-    const waiter = piControlWaiters.get(body.request_id)
-    if (waiter) {
-      piControlWaiters.delete(body.request_id)
-      clearTimeout(waiter.timer)
-      waiter.resolve(body)
-    }
-    return
-  }
-  if (provider === 'pi' && ev === 'StreamReady') {
-    // The extension reconnects independently of the provider process after a
-    // daemon restart. Its native isIdle() result is the missing bounded proof:
-    // active work regains a poller, while an already-idle historical turn is
-    // released fail-closed so fresh queued work can dispatch without a manual
-    // owner prompt.
-    if (body.idle === false) {
-      if (session.piTurnStartedAt && !piPollers.has(session.id)) startPiPoller(session)
-      if (session.teamActiveTaskId) teamTurnProof.add(session.id)
-      return
-    }
-    if (body.idle === true && session.piTurnStartedAt &&
-        !['active', 'paused'].includes(session.managed?.status) && session.piRouting?.status !== 'routing') {
-      const idleTask = readoptedTeamTaskFingerprint(session)
-      const released = await releaseIdleReadoptedTeamTaskIfStillIdle(session, idleTask, 'Pi', {
-        trackedProviderTurn: 'pi',
-      })
-      if (released) {
-        clearStatusDeferred(session)
-        setImmediate(() => reconcileTeamTasks().catch(error =>
-          log('Pi stream re-adoption dispatch failed', String(error?.message || error))))
-      }
-    }
-    return
-  }
-  if (provider === 'pi' && ev === 'InputError') {
-    const reason = String(body.error || 'Pi could not accept that input.').slice(0, 500)
-    clearTeamInputReservation(session)
-    if (session.teamActiveTaskId) {
-      discardQueuedTeamTaskPrompt(session, session.teamActiveTaskId)
-      await failTeamTaskForSession(session, `Pi rejected the delegated input: ${reason}`)
-    } else saveStateNow(state)
-    if (session.channel) await post(session.channel, `⚠️ ${reason}`)
-    return
-  }
-  if (provider === 'pi' && ev === 'ManagedCheckpoint') {
-    recordPiUsage(session, body)
-    session.piTurnUsage = null
-    saveState(state)
-    return
-  }
-  if (provider === 'pi' && ev === 'ManagedChildUsage') {
-    recordPiUsage(session, body)
-    session.piTurnUsage = null
-    saveState(state)
-    return
-  }
-  if (provider === 'pi' && ev === 'ManagedRouting') {
-    session.piTurnStartedAt = session.piRouting?.startedAt || Date.now()
-    session.piTurnUsage = null
-    startPiPoller(session)
-    saveState(state)
-    return
-  }
-  if (provider === 'pi' && ev === 'ManagedRoute') {
-    if (body.usage) recordPiUsage(session, body)
-    session.piTurnUsage = null
-    stopPoller(session)
-    await clearStatus(session)
-    if (session.channel && body.route === 'managed') {
-      await post(session.channel, `🧭 *Promoted to a managed Pi run* — ${String(body.reason || 'this task benefits from planning, validation, and review').slice(0, 1000)}`)
-    }
-    saveState(state)
-    return
-  }
-  if (provider === 'pi' && ev === 'ManagedPolicy') {
-    saveState(state)
-    return
-  }
-  if (provider === 'pi' && ['ManagedStatus', 'ManagedPlan', 'ManagedReview'].includes(ev)) {
-    const managed = session.managed
-    if (managed?.status === 'active') {
-      if (managed.id !== previousManagedId) session.piTurnUsage = null
-      session.piTurnStartedAt ||= managed.startedAt || Date.now()
-      startPiPoller(session)
-    } else {
-      stopPoller(session)
-      await clearStatus(session)
-    }
-    if (session.channel && ev === 'ManagedPlan' && body.plan && session.lastManagedPlanId !== managed?.id) {
-      const plan = body.plan
-      const steps = Array.isArray(plan.steps)
-        ? plan.steps.slice(0, 24).map((step, index) => `${Number(step.id) || index + 1}. ${String(step.text || '').slice(0, 1000)}`).join('\n')
-        : ''
-      const risks = Array.isArray(plan.risks) && plan.risks.length
-        ? `\n\n*Risks*\n${plan.risks.slice(0, 12).map(risk => `• ${String(risk).slice(0, 1000)}`).join('\n')}`
-        : ''
-      await postMd(session.channel,
-        `📋 *Managed Pi plan*${plan.summary ? ` — ${String(plan.summary).slice(0, 1500)}` : ''}\n\n${steps}${risks}\n\n` +
-        (body.auto ? '_Executing automatically. Use `/sab-run pause` to pause._' : '_Waiting for `/sab-run approve`._'))
-      session.lastManagedPlanId = managed?.id || null
-    }
-    if (session.channel && ev === 'ManagedReview' && body.review?.verdict === 'fix') {
-      const findings = Array.isArray(body.review.findings)
-        ? body.review.findings.slice(0, 20).map(item => `• ${String(item).slice(0, 1500)}`).join('\n')
-        : ''
-      await postMd(session.channel, `🔎 *Managed review requested fixes*\n${findings || String(body.review.summary || 'Review found changes to make.').slice(0, 3000)}`)
-    }
-    if (session.channel && ev === 'ManagedReview' && body.review?.verdict === 'pass') {
-      await post(session.channel, '✅ Independent managed review passed — preparing the final response…')
-    }
-    if (body.notice && managed?.status !== 'complete') {
-      stopPoller(session)
-      await clearStatus(session)
-      if (session.channel) await post(session.channel, `⚠️ ${String(body.notice).slice(0, 3000)}`)
-    }
-    saveState(state)
-    return
-  }
-  if (provider === 'pi' && (ev === 'Status' || ev === 'Settings')) {
-    if (ev === 'Status') {
-      // A post-restart native event is the first trustworthy proof that the
-      // persisted Pi turn is still live. Only then may status polling and team
-      // authority be restored; the old timestamp alone is not liveness proof.
-      if (session.piTurnStartedAt && !piPollers.has(session.id)) startPiPoller(session)
-      if (session.teamActiveTaskId) teamTurnProof.add(session.id)
-    }
-    if (session.channel && ev === 'Settings') await updateTopic(session)
-    return
-  }
-  if (provider === 'pi' && ev === 'AgentStart') {
-    if (session.teamActiveTaskId) teamTurnProof.add(session.id)
-    if (!targetClaim && !internalTurns.has(session.id) && session.channel) beginPiTurn(session)
-    return
   }
 
   const standby = !targetClaim && standbyForSession(state, sid)
@@ -2609,7 +2294,6 @@ async function processHook(body, ppid, tmux, flags, account, requestedProvider =
     const teamTaskTurn = currentTeamTaskProviderTurn(session, body)
     if (await completePrivateTurn(session, body, targetClaim)) return
     if (provider === 'codex') await finalizeCodexTurn(session, body, teamTaskTurn)
-    else if (provider === 'pi') await finalizePiTurn(session, body, teamTaskTurn)
     else await finalizeTurn(session, {
       teamTaskTurn,
       deferredFinal: matchingDeferredTeamProviderFinal(session, 'claude', teamTaskTurn, body),
@@ -2647,21 +2331,18 @@ async function processHook(body, ppid, tmux, flags, account, requestedProvider =
 
 // ---- permission relay -------------------------------------------------------
 const codexPermissionWaiters = new Map() // short request id → held hook response
-const piPermissionWaiters = new Map() // short request id → held extension response
+ // short request id → held extension response
 function clearPermissionsForPid(pid, reason = 'session ended') {
   if (!pid) return 0
   let cleared = 0
   for (const [rid, request] of Object.entries(state.perms)) {
     if (Number(request.pid) !== Number(pid)) continue
     delete state.perms[rid]
-    const waiter = codexPermissionWaiters.get(rid) || piPermissionWaiters.get(rid)
+    const waiter = codexPermissionWaiters.get(rid)
     if (waiter) {
       codexPermissionWaiters.delete(rid)
-      piPermissionWaiters.delete(rid)
       clearTimeout(waiter.timer)
-      if (!waiter.res.writableEnded) waiter.res.end(waiter.provider === 'pi'
-        ? JSON.stringify(waiter.kind === 'trust' ? { trusted: 'no', remember: false } : { behavior: 'deny', reason })
-        : '{}')
+      if (!waiter.res.writableEnded) waiter.res.end(('{}'))
     }
     web.chat.update({
       channel: request.channel, ts: request.ts,
@@ -2683,7 +2364,7 @@ function permissionId() {
 }
 async function postPermissionPrompt(channel, p) {
   const preview = String(p.input_preview || '').slice(0, 1200)
-  const agent = p.provider === 'codex' ? 'Codex' : p.provider === 'pi' ? 'Pi' : 'Claude'
+  const agent = p.provider === 'codex' ? 'Codex' : ('Claude')
   const blocks = [
     { type: 'section', text: { type: 'mrkdwn', text: `🔐 *${agent} wants to use \`${escapeText(p.tool_name || 'a tool')}\`*\n${escapeText(String(p.description || '').slice(0, 600))}` } },
   ]
@@ -2710,17 +2391,12 @@ async function applyVerdict(rid, behavior, channel, ts) {
   delete state.perms[rid]
   saveState(state)
   const waiter = codexPermissionWaiters.get(rid)
-  const piWaiter = piPermissionWaiters.get(rid)
-  if (waiter || piWaiter) {
-    const held = waiter || piWaiter
+
+  if (waiter) {
+    const held = waiter
     codexPermissionWaiters.delete(rid)
-    piPermissionWaiters.delete(rid)
     clearTimeout(held.timer)
-    if (!held.res.writableEnded) held.res.end(JSON.stringify(piWaiter
-      ? held.kind === 'trust'
-        ? { trusted: behavior === 'allow' ? 'yes' : 'no', remember: false }
-        : { behavior }
-      : codexPermissionDecision(behavior)))
+    if (!held.res.writableEnded) held.res.end(JSON.stringify(codexPermissionDecision(behavior)))
   } else {
     const s = streams.get(req.pid)
     if (s) s.res.write(`data: ${JSON.stringify({ type: 'permission_verdict', request_id: rid, behavior })}\n\n`)
@@ -2737,58 +2413,15 @@ async function applyVerdict(rid, behavior, channel, ts) {
 function injectToSession(pid, text, files = [], privateContext = '', route = null) {
   const s = streams.get(pid)
   if (s) {
-    const payload = s.provider === 'pi'
-      ? {
-          type: 'prompt', text,
-          ...(files.length ? { files } : {}),
-          ...(privateContext ? { privateContext } : {}),
-          ...(route ? { route } : {}),
-        }
-      : { type: 'message', text }
+    const payload = ({ type: 'message', text })
     s.res.write(`data: ${JSON.stringify(payload)}\n\n`)
     return true
   }
   return false
 }
 
-function piPromptQueueItem(text, { files = [], privateContext = '', route = null } = {}) {
-  return {
-    text: String(text || ''), files: Array.isArray(files) ? files : [],
-    privateContext: String(privateContext || ''), route,
-  }
-}
-
 function queuedPromptText(value) {
   return typeof value === 'string' ? value : `${String(value?.text || '')}${String(value?.privateContext || '')}`
-}
-
-function injectQueuedPiPrompt(pid, value) {
-  if (typeof value === 'string') return injectToSession(pid, value)
-  return injectToSession(pid, value?.text, value?.files, value?.privateContext, value?.route)
-}
-
-function sendPiControl(session, action, value = null, timeoutMs = 15000, expectedSessionId = null) {
-  if (providerOf(session) !== 'pi') return Promise.reject(new Error('not a Pi session'))
-  const stream = streams.get(session.pid)
-  if (!stream || stream.provider !== 'pi') return Promise.reject(new Error('Pi control stream is not connected'))
-  if (!piMutableControlAllowed(stream.capabilities, action, expectedSessionId)) {
-    return Promise.reject(new Error(
-      'This running Pi extension predates exact-session setting controls. Run `/sab-update current` to activate the staged extension before changing model or effort.',
-    ))
-  }
-  const requestId = crypto.randomUUID()
-  const result = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      piControlWaiters.delete(requestId)
-      reject(new Error(`Pi ${action} command timed out`))
-    }, timeoutMs)
-    piControlWaiters.set(requestId, { resolve, reject, timer })
-  })
-  stream.res.write(`data: ${JSON.stringify({
-    type: 'control', action, value, requestId,
-    ...(expectedSessionId ? { expectedSessionId } : {}),
-  })}\n\n`)
-  return result
 }
 
 // Rebuild the launch args for a resume: replay the original flags (so
@@ -2800,7 +2433,6 @@ function resumeArgs(session, initialPrompt = null) {
   return resumeArgsFor(withMeta, {
     defaultClaudeFlags: process.env.CCS_RESUME_FLAGS || '--dangerously-skip-permissions',
     defaultCodexFlags: process.env.CCS_CODEX_RESUME_FLAGS || CODEX_DANGEROUS_FLAG,
-    defaultPiFlags: process.env.CCS_PI_RESUME_FLAGS || '',
     initialPrompt,
   })
 }
@@ -2903,8 +2535,7 @@ async function resurrect(session, text) {
         await post(session.channel, `⚠️ Folder \`${session.cwd}\` was gone — recreated it empty and resuming there. The conversation is intact; files from the original folder are not.`)
       } catch (e) {
         const manual = provider === 'codex' ? `codex resume ${session.id}`
-          : provider === 'pi' ? `pi --session ${session.id}`
-            : `claude --resume ${session.id}`
+          : (`claude --resume ${session.id}`)
         return post(session.channel, `❌ Can't resume — folder \`${session.cwd}\` is gone and couldn't be recreated (${e?.code || e}). The transcript is preserved; resume manually with \`${manual}\` from a valid directory.`)
       }
     }
@@ -3059,9 +2690,7 @@ async function capturePrivateTurn(session, prompt) {
   const result = waitForPrivateTurn(internalTurns, session.id)
   rememberInjected(session.id, prompt)
   try {
-    if (providerOf(session) === 'pi') {
-      if (!injectToSession(session.pid, prompt, [], '', 'native')) throw new Error('Pi control stream is unavailable')
-    } else await tmuxPaste(session.tmux, prompt)
+    await tmuxPaste(session.tmux, prompt)
   }
   catch (error) {
     const waiter = internalTurns.get(session.id)
@@ -3079,10 +2708,7 @@ async function captureTargetValidation(transition, prompt) {
     await submitTargetValidation(transition.target.provider, {
       waitForClaim: () => waitForTargetSessionClaim(transition, { sleepFn: sleep }),
       inject: async () => {
-        if (transition.target.provider !== 'pi') return tmuxPaste(transition.target.tmux, prompt)
-        const target = state.sessions[transition.target.sid]
-        rememberInjected(transition.target.sid, prompt)
-        if (!target || !injectToSession(target.pid, prompt, [], '', 'native')) throw new Error('Pi target control stream is unavailable')
+        return tmuxPaste(transition.target.tmux, prompt)
       },
     })
   }
@@ -3102,10 +2728,7 @@ async function waitForTargetInputReady(channel, transition, timeoutMs = 5 * 6000
     if (!transition?.target?.tmux || !(await tmuxAlive(transition.target.tmux))) {
       throw new Error(`${providerLabel(transition.target.provider)} target tmux session ended during startup`)
     }
-    if (transition.target.provider === 'pi' && transition.target.sid) {
-      const target = state.sessions[transition.target.sid]
-      if (target?.pid && streams.get(target.pid)?.provider === 'pi') return
-    }
+
     const pane = await tmuxCapture(transition.target.tmux)
     const startup = targetStartupState(transition.target.provider, pane)
     if (startup === 'ready') return
@@ -3175,14 +2798,10 @@ async function generateInstructionProposal(preflight, provider) {
       ? await runWithInput(codexBin(), ['exec', '--sandbox', 'read-only', '--ephemeral', '--color', 'never', '--skip-git-repo-check', '-'], {
         cwd: neutralCwd, input: prompt, timeout,
       })
-      : provider === 'pi'
-        ? await runWithInput(piBin(), ['--print', '--no-tools', '--no-session', '--no-context-files'], {
-          cwd: neutralCwd, input: prompt, timeout,
-        })
-        : await runWithInput(claudeBin(), [
+      : (await runWithInput(claudeBin(), [
           '--print', '--permission-mode', 'plan', '--disallowedTools', 'Bash,Edit,Write,NotebookEdit',
           '--no-session-persistence',
-        ], { cwd: neutralCwd, input: prompt, timeout })
+        ], { cwd: neutralCwd, input: prompt, timeout }))
     const documents = buildInstructionDocuments(parseInstructionDocuments(output))
     return await buildInstructionPatch(preflight, documents, { tempRoot: CONFIG_DIR })
   } finally {
@@ -3210,7 +2829,7 @@ async function validateInstructionPatchResult(preflight, patch) {
 function switchBlockReason(session, channel, { allowCurrentTransition = false } = {}) {
   if (!allowCurrentTransition && activeTransition(channel)) return 'A provider switch is already in progress in this channel.'
   if (!(session?.pid && pidAlive(session.pid) && session.tmux)) return 'Wake the session first; provider switching requires an active, idle source.'
-  if (pollers.has(session.id) || codexPollers.has(session.id) || piPollers.has(session.id)) return 'Wait for the current agent turn to finish before switching providers.'
+  if (pollers.has(session.id) || codexPollers.has(session.id)) return 'Wait for the current agent turn to finish before switching providers.'
   if (qforms.has(session.id)) return 'Answer or dismiss the open question before switching providers.'
   if (hasPendingPerm(session)) return 'Resolve the open permission request before switching providers.'
   if (internalTurns.has(session.id)) return 'The bridge is already running a private maintenance turn.'
@@ -3527,8 +3146,8 @@ async function updateProviderCli(provider) {
   const before = await agentVersion(provider)
   let note = ''
   try {
-    const bin = provider === 'codex' ? codexBin() : provider === 'pi' ? piBin() : claudeBin()
-    const updateArgs = provider === 'pi' ? ['update', 'self'] : ['update']
+    const bin = provider === 'codex' ? codexBin() : (claudeBin())
+    const updateArgs = (['update'])
     const { stdout, stderr } = await execFile(bin, updateArgs, { timeout: 180000 })
     note = (stdout + '\n' + stderr).split('\n').map(s => s.trim()).filter(Boolean).pop() || ''
   } catch (e) { note = `error: ${e?.stderr?.trim() || e?.message || e}` }
@@ -3680,7 +3299,7 @@ async function updateAndRestart(session, { expectedSessionId = null } = {}) {
 
 function bulkUpdateContext() {
   return {
-    busySessionIds: new Set([...pollers.keys(), ...codexPollers.keys(), ...piPollers.keys()]),
+    busySessionIds: new Set([...pollers.keys(), ...codexPollers.keys()]),
     questionSessionIds: new Set(qforms.keys()),
     pendingPermissionChannels: new Set(Object.values(state.perms || {}).map(permission => permission.channel).filter(Boolean)),
     transitionChannels: new Set(Object.keys(state.lineages || {}).filter(channel => activeTransition(channel))),
@@ -3811,17 +3430,6 @@ async function handleSlackMessage(channel, text, sender, request) {
     }
     return post(channel, `🕸️ Delegated team task \`${managedSession.teamActiveTaskId}\` currently owns this worker turn. Wait for its final response or use \`/sab-stop\` before sending unrelated work.`)
   }
-  if (providerOf(managedSession) === 'pi' && (
-    ['active', 'paused'].includes(managedSession?.managed?.status) || managedSession?.piRouting?.status === 'routing'
-  )) {
-    if (!sender && !(managedSession.pid && pidAlive(managedSession.pid))) {
-      await resurrect(managedSession)
-      return
-    }
-    return post(channel, managedSession?.piRouting?.status === 'routing'
-      ? '🧭 Pi is already assessing another prompt. Wait for its routing decision or use `/sab-stop`.'
-      : '🧭 A managed Pi run owns this session. Use `/sab-run status`, `/sab-run pause`, `/sab-run continue`, or `/sab-run cancel`; ordinary prompts resume after it completes or is cancelled.')
-  }
 
   // Collaborators may only send prompts into a LIVE session: no permission
   // verdicts, no commands, and no resurrection (that would spawn a terminal on
@@ -3836,11 +3444,7 @@ async function handleSlackMessage(channel, text, sender, request) {
     beginSlackTeamTurn(session, sender, request)
     reserveTeamInput(session, 'slack')
     try {
-      if (providerOf(session) === 'pi') {
-        await injectText(session, attributed, {
-          privateContext: artifactDeliveryContext(session, request), route: 'native',
-        })
-      } else await injectText(session, withArtifactDelivery(session, attributed, request))
+      await injectText(session, withArtifactDelivery(session, attributed, request))
     } catch (error) {
       clearTeamInputReservation(session)
       saveStateNow(state)
@@ -3858,7 +3462,7 @@ async function handleSlackMessage(channel, text, sender, request) {
 
   const session = sessionByChannel(channel)
   if (!session) {
-    if (channel === state.control) return post(channel, 'This is the control channel. Use `/sab-new <claude|codex|pi>` to start a session, or `/sab-status` to list them all.')
+    if (channel === state.control) return post(channel, 'This is the control channel. Use `/sab-new <claude|codex>` to start a session, or `/sab-status` to list them all.')
     log('inbound (unmapped channel, ignored)', channel)
     return
   }
@@ -3868,9 +3472,7 @@ async function handleSlackMessage(channel, text, sender, request) {
   if (updatingSessions.has(session.id) || drainingSessionInput.has(session.id) || pendingBySid.get(session.id)?.length) {
     reserveTeamInput(session, 'slack')
     try {
-      if (providerOf(session) === 'pi') {
-        await injectText(session, trimmed, { privateContext: ownerPromptPrivateContext(session, request) })
-      } else await injectText(session, trimmed + ownerPromptPrivateContext(session, request))
+      await injectText(session, trimmed + ownerPromptPrivateContext(session, request))
     } catch (error) {
       clearTeamInputReservation(session)
       saveStateNow(state)
@@ -3897,9 +3499,7 @@ async function handleSlackMessage(channel, text, sender, request) {
   }
   reserveTeamInput(session, 'slack')
   try {
-    if (providerOf(session) === 'pi') {
-      await injectText(session, trimmed, { privateContext: ownerPromptPrivateContext(session, request) })
-    } else await injectText(session, trimmed + ownerPromptPrivateContext(session, request))
+    await injectText(session, trimmed + ownerPromptPrivateContext(session, request))
   } catch (error) {
     clearTeamInputReservation(session)
     saveStateNow(state)
@@ -3938,9 +3538,7 @@ async function injectText(session, text, options = {}) {
       throw new TeamError('target_busy', 'The exact target session is in maintenance or has older queued input.', 409)
     }
     const queued = pendingBySid.get(session.id) || []
-    const item = provider === 'pi'
-      ? piPromptQueueItem(text, options)
-      : `${String(text || '')}${String(options.privateContext || '')}`
+    const item = (`${String(text || '')}${String(options.privateContext || '')}`)
     pendingBySid.set(session.id, [...queued, item])
     await post(session.channel, updating || draining
       ? '⏸️ Provider maintenance is in progress — queued this message for the resumed session.'
@@ -3996,28 +3594,7 @@ async function injectText(session, text, options = {}) {
   const discardExpectedTeamTurn = () => {
     if (discardPendingTeamProviderTurn(session, expectedTeamTurn)) saveStateNow(state)
   }
-  if (provider === 'pi') {
-    const queuedPrompt = piPromptQueueItem(text, options)
-    const combined = queuedPromptText(queuedPrompt)
-    if (alive) {
-      assertExpectedBinding()
-      if (injectQueuedPiPrompt(session.pid, queuedPrompt)) {
-        acceptExpectedTeamTurn()
-        rememberInjected(session.id, combined)
-        log('inject (Pi extension) → session', session.id.slice(0, 8), JSON.stringify(String(text).slice(0, 50)))
-        return
-      }
-    }
-    if (options.expectedSessionId) {
-      discardExpectedTeamTurn()
-      throw new TeamError('target_busy', 'The exact Pi input surface did not accept the task message.', 409)
-    }
-    log('queue Pi prompt', session.id.slice(0, 8), 'pid', session.pid, 'cwd', session.cwd)
-    const queued = pendingBySid.get(session.id) || []
-    pendingBySid.set(session.id, [...queued, queuedPrompt])
-    if (!alive) await resurrect(session, text)
-    return
-  }
+
   const delivered = `${String(text || '')}${String(options.privateContext || '')}`
   if (alive && session.tmux && (await tmuxAlive(session.tmux))) {
     assertExpectedBinding()
@@ -4104,13 +3681,7 @@ async function handleAttachments(channel, caption, files, sender, request) {
   if (session.teamActiveTaskId) {
     return post(channel, `🕸️ Delegated team task \`${session.teamActiveTaskId}\` currently owns this worker turn. Wait for it to finish before sending unrelated attachments.`)
   }
-  if (providerOf(session) === 'pi' && (
-    ['active', 'paused'].includes(session.managed?.status) || session.piRouting?.status === 'routing'
-  )) {
-    return post(channel, session.piRouting?.status === 'routing'
-      ? '🧭 Pi is already assessing another prompt. Wait for its routing decision or use `/sab-stop`.'
-      : '🧭 A managed Pi run owns this session. Cancel it before sending another attachment.')
-  }
+
   if (sender && !(session.pid && pidAlive(session.pid))) {
     return post(channel, `💤 Session is dormant — <@${sender.id}>’s attachment wasn’t delivered. Only the owner can resume it.`)
   }
@@ -4143,14 +3714,7 @@ async function handleAttachments(channel, caption, files, sender, request) {
     : `I attached ${saved.length} file(s) from Slack. Please read them:\n${list}`
   const attributed = sender ? `[Slack collaborator ${sender.name}]\n${body}` : body
   const teamPrivateContext = beginSlackTeamTurn(session, sender, request)
-  if (providerOf(session) === 'pi') {
-    await injectText(session, attributed, {
-      files: saved, privateContext: artifactDeliveryContext(session, request) + teamPrivateContext,
-      route: sender ? 'native' : null,
-    })
-    injected = true
-    return
-  }
+
   const delivered = withArtifactDelivery(session, attributed, request) + teamPrivateContext
   await injectText(session, delivered)
   injected = true
@@ -4286,8 +3850,8 @@ function teamContinuationBusyReason(session) {
   if (session.teamTurn) reasons.push('coordinator turn')
   if (session.teamInputReservation) reasons.push('input reservation')
   if (session.teamActiveTaskId) reasons.push('delegated task')
-  if (session.codexTurnStartedAt || session.piTurnStartedAt || pollers.has(session.id) ||
-      codexPollers.has(session.id) || piPollers.has(session.id)) reasons.push('provider turn')
+  if (session.codexTurnStartedAt || pollers.has(session.id) ||
+      codexPollers.has(session.id)) reasons.push('provider turn')
   return reasons.join(', ')
 }
 
@@ -4380,8 +3944,8 @@ async function runTeamContinuation(teamId) {
     return false
   }
   if (coordinator.teamTurn || coordinator.teamInputReservation || coordinator.teamActiveTaskId ||
-      coordinator.codexTurnStartedAt || coordinator.piTurnStartedAt || pollers.has(coordinator.id) ||
-      codexPollers.has(coordinator.id) || piPollers.has(coordinator.id)) {
+      coordinator.codexTurnStartedAt || pollers.has(coordinator.id) ||
+      codexPollers.has(coordinator.id)) {
     const reason = teamContinuationBusyReason(coordinator)
     const waiting = noteContinuationWaiting(team, reason)
     if (waiting.changed) saveStateNow(state)
@@ -4622,16 +4186,14 @@ function teamTargetBusyReasons(session) {
   if (durableTask) reasons.push(`task ${durableTask.status}`)
   if (session.teamActiveTaskId && !durableTask) reasons.push('task binding')
   if (session.teamInputReservation) reasons.push('input reserved')
-  if (pollers.has(session.id) || codexPollers.has(session.id) || piPollers.has(session.id) ||
-      session.codexTurnStartedAt || session.piTurnStartedAt) reasons.push('provider turn')
+  if (pollers.has(session.id) || codexPollers.has(session.id) ||
+      session.codexTurnStartedAt) reasons.push('provider turn')
   if (pendingBySid.get(session.id)?.length) reasons.push('queued input')
   if (qforms.has(session.id)) reasons.push('question')
   if (hasPendingPerm(session)) reasons.push('permission')
   if (activeTransition(session.channel) || switchingSids.has(session.id)) reasons.push('provider switch')
   if (updatingSessions.has(session.id) || restarting.has(session.id) || resurrectInFlight.has(session.id)) reasons.push('maintenance')
   if (internalTurns.has(session.id)) reasons.push('private turn')
-  if (['active', 'paused'].includes(session.managed?.status)) reasons.push('managed Pi run')
-  if (session.piRouting?.status === 'routing') reasons.push('Pi routing')
   return reasons
 }
 
@@ -4883,15 +4445,7 @@ async function injectCoordinatorTaskMessageOnce(task, target, expected, prompt, 
       acceptedAt,
     })
   }
-  if (expected.provider === 'pi') {
-    if (!injectQueuedPiPrompt(expected.pid, piPromptQueueItem(prompt))) {
-      forgetInjected(expected.sid, prompt)
-      throw knownUndeliveredTeamMessage('The exact Pi input stream did not accept the coordinator message.')
-    }
-    const activeTurn = activateSubmittedTurn()
-    refreshTeamTaskPoller(target, activeTurn)
-    return activeTurn
-  }
+
   // This is deliberately one transport attempt. tmuxPaste can become
   // uncertain after its buffer or Enter side effect; falling back to a channel
   // stream would risk submitting the same coordinator instruction twice.
@@ -5178,12 +4732,7 @@ async function dispatchTeamTask(task) {
   saveStateNow(state)
   await updateTeamTaskAudit(task)
   try {
-    if (providerOf(target) === 'pi') {
-      await injectText(target, prompt, {
-        route: 'native', files: task.files,
-        expectedSessionId: target.id, expectedTeamTaskId: task.id,
-      })
-    } else {
+    {
       await injectText(target, prompt, {
         expectedSessionId: target.id, expectedTeamTaskId: task.id,
       })
@@ -5218,7 +4767,7 @@ function repairDurableTeamBindings({ now = Date.now() } = {}) {
     for (const repair of bindingRepair.repairs) {
       log('reconciled team/session binding', repair.sessionId.slice(0, 8), repair.taskId, repair.reason)
       if (repair.reason === 'restored_durable_task_binding' &&
-          (pollers.has(repair.sessionId) || codexPollers.has(repair.sessionId) || piPollers.has(repair.sessionId))) {
+          (pollers.has(repair.sessionId) || codexPollers.has(repair.sessionId))) {
         const session = state.sessions?.[repair.sessionId]
         const taskTurn = currentTeamTaskProviderTurn(session)
         const snapshotRequired = pollers.has(repair.sessionId) || codexPollers.has(repair.sessionId)
@@ -5366,7 +4915,7 @@ async function reconcileTeamTasks() {
           await updateTeamTaskAudit(task).catch(error =>
             log('team reply acceptance audit deferred', task.id, String(error?.message || error)))
         } else if (task.status === 'dispatching' && Date.parse(task.dispatchClaimedAt || 0) + 5 * 60 * 1000 <= now &&
-            !pollers.has(target.id) && !codexPollers.has(target.id) && !piPollers.has(target.id)) {
+            !pollers.has(target.id) && !codexPollers.has(target.id)) {
           if (target.teamActiveTaskId === task.id) {
             delete target.teamActiveTaskId
             noteTeamAvailability(target, 'uncertain_dispatch_released', now)
@@ -5416,7 +4965,7 @@ function providerTurnTracked(session) {
   // provider is still executing after this daemon started. Readoption restores
   // a provider poller only after provider-specific live evidence, so the
   // in-memory poller is the recovery fence for an interrupted continuation.
-  return Boolean(session && (pollers.has(session.id) || codexPollers.has(session.id) || piPollers.has(session.id)))
+  return Boolean(session && (pollers.has(session.id) || codexPollers.has(session.id)))
 }
 
 async function liveInterruptedContinuationTurn(team, event, coordinator) {
@@ -5606,7 +5155,6 @@ function readoptedTeamTaskFingerprint(session) {
     taskId: session.teamActiveTaskId,
     provider: providerOf(session),
     codexTurnStartedAt: session.codexTurnStartedAt || null,
-    piTurnStartedAt: session.piTurnStartedAt || null,
     teamTurnStartedAt: session.teamTurn?.startedAt || null,
     inputAcceptedAt: session.teamInputReservation?.acceptedAt || null,
   })
@@ -5614,10 +5162,7 @@ function readoptedTeamTaskFingerprint(session) {
 
 function readoptedTeamTaskStillIdle(session, expected, { trackedProviderTurn = null } = {}) {
   if (!session || !expected) return false
-  const providerTurnMatches = trackedProviderTurn === 'pi'
-    ? expected.provider === 'pi' && expected.piTurnStartedAt &&
-      session.piTurnStartedAt === expected.piTurnStartedAt && !session.codexTurnStartedAt
-    : !session.codexTurnStartedAt && !session.piTurnStartedAt
+  const providerTurnMatches = (!session.codexTurnStartedAt)
   return Boolean(state.sessions?.[expected.sid] === session &&
     session.id === expected.sid && session.pid === expected.pid && session.tmux === expected.tmux &&
     session.channel === expected.channel && session.teamActiveTaskId === expected.taskId &&
@@ -5625,7 +5170,7 @@ function readoptedTeamTaskStillIdle(session, expected, { trackedProviderTurn = n
     (session.teamTurn?.startedAt || null) === expected.teamTurnStartedAt &&
     (session.teamInputReservation?.acceptedAt || null) === expected.inputAcceptedAt &&
     expected.pid > 1 && pidAlive(expected.pid) && !teamTurnProof.has(expected.sid) &&
-    !pollers.has(expected.sid) && !codexPollers.has(expected.sid) && !piPollers.has(expected.sid) &&
+    !pollers.has(expected.sid) && !codexPollers.has(expected.sid) &&
     providerTurnMatches)
 }
 
@@ -5637,7 +5182,7 @@ async function releaseIdleReadoptedTeamTaskIfStillIdle(session, expected, label,
   // Clear only the exact idle snapshot that survived both asynchronous process
   // checks. A delayed prompt hook will have installed a poller/turn marker and
   // fails the final predicate, so this cannot erase a newly active owner turn.
-  if (options.trackedProviderTurn === 'pi') stopPoller(session)
+
   const clearedTurn = clearTeamTurn(session)
   const clearedInput = clearTeamInputReservation(session)
   if (expected.taskId) return releaseIdleReadoptedTeamTask(session, label)
@@ -6166,11 +5711,7 @@ async function spawnNew(channel, dir, extraFlags, provider = 'claude') {
   try { flags = normalizeRemoteLaunchFlags(provider, extraFlags) }
   catch (error) { return post(channel, `❌ ${String(error?.message || error)}`) }
   const tmuxName = `sab-new-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`
-  if (provider === 'pi') {
-    pendingSpawnChannels.set(tmuxName, channel)
-    const pendingTimer = setTimeout(() => pendingSpawnChannels.delete(tmuxName), 10 * 60000)
-    pendingTimer.unref?.()
-  }
+
   await post(channel, `🚀 Spawning \`${providerCommand(provider)} ${flags.join(' ')}\` in \`${cwd}\`${account ? ` under \`${account}\`` : ''}…`)
   await executionNodes.spawn(LOCAL_NODE_ID, {
     cwd, args: flags, title: `sab ${path.basename(cwd)}`, tmuxName,
@@ -6385,62 +5926,6 @@ async function usageReport(channel, provider) {
     (provider === 'claude' ? limitFooter() : ''))
 }
 
-function piUsageSummary(rows) {
-  const fields = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'totalTokens', 'cost']
-  return Object.fromEntries(fields.map(field => [field, rows.reduce((sum, row) => sum + Number(row?.[field] || 0), 0)]))
-}
-
-async function piUsageReport(channel, sub, nArg) {
-  const all = Array.isArray(state.piUsage) ? state.piUsage : []
-  const session = channel !== state.control ? sessionByChannel(channel) : null
-  if (sub === 'days' || sub === 'daily') {
-    const n = Math.min(Math.max(parseInt(nArg, 10) || 7, 1), 14)
-    const since = Date.now() - n * 86400000
-    const grouped = new Map()
-    for (const row of piUsageRows(all, { since })) {
-      const day = new Date(row.at).toISOString().slice(0, 10)
-      const bucket = grouped.get(day) || []
-      bucket.push(row); grouped.set(day, bucket)
-    }
-    if (!grouped.size) return post(channel, 'No Pi usage data yet.')
-    const rows = [...grouped].map(([day, entries]) => {
-      const total = piUsageSummary(entries)
-      const models = [...new Set(entries.map(entry => entry.model))].join(', ')
-      return `| ${day} | ${models} | ${fmtTok(total.inputTokens)} | ${fmtTok(total.outputTokens)} | ${fmtTok(total.cacheReadTokens)} | ${fmtTok(total.totalTokens)} | ${fmtUsd(total.cost)} |`
-    })
-    return postMd(channel, `*Pi usage by day*\n| Day | Models | In | Out | Cache R | Total | Cost |\n|---|---|---|---|---|---|---|\n${rows.join('\n')}`)
-  }
-  if (sub === 'models') {
-    const grouped = new Map()
-    for (const row of all) {
-      const bucket = grouped.get(row.model) || []
-      bucket.push(row); grouped.set(row.model, bucket)
-    }
-    if (!grouped.size) return post(channel, 'No Pi usage data yet.')
-    const rows = [...grouped].map(([model, entries]) => {
-      const total = piUsageSummary(entries)
-      return `| ${model} | ${fmtTok(total.inputTokens)} | ${fmtTok(total.outputTokens)} | ${fmtTok(total.cacheReadTokens)} | ${fmtTok(total.totalTokens)} | ${fmtUsd(total.cost)} |`
-    })
-    return postMd(channel, `*Pi usage by model*\n| Model | In | Out | Cache R | Total | Cost |\n|---|---|---|---|---|---|\n${rows.join('\n')}`)
-  }
-  const rows = session ? piUsageRows(all, { cwd: session.cwd }) : all
-  const total = piUsageSummary(rows)
-  if (session) {
-    const currentRows = piUsageRows(all, { sessionId: session.id })
-    const current = piUsageSummary(currentRows)
-    const live = normalizePiUsage(session.piTurnUsage, session.piContextUsage) || session.piUsage
-    const context = live?.contextWindow
-      ? `${fmtTok(live.contextTokens)} / ${fmtTok(live.contextWindow)} (${Math.round(live.contextPercent || 0)}%)`
-      : '—'
-    return postMd(channel, `*Pi usage — ${path.basename(session.cwd)}*\n` +
-      `| Scope | Tokens | Cost |\n|---|---|---|\n` +
-      `| This session (${session.id.slice(0, 8)}) | ${fmtTok(current.totalTokens)} | ${fmtUsd(current.cost)} |\n` +
-      `| Project, all sessions | ${fmtTok(total.totalTokens)} | ${fmtUsd(total.cost)} |\n` +
-      `_Current context: ${context}_`)
-  }
-  return postMd(channel, `*Pi usage — all projects*\n| Turns | Tokens | Cost |\n|---|---|---|\n| ${rows.length} | ${fmtTok(total.totalTokens)} | ${fmtUsd(total.cost)} |`)
-}
-
 // ---- per-session subscriptions ----------------------------------------------
 // A session can run under a named Claude account (see `sab account`), so each
 // person's work bills to their own subscription. The daemon only ever handles
@@ -6528,39 +6013,6 @@ async function setCodexSetting(session, name, value, { expectedSessionId = null 
   })
 }
 
-async function setPiSetting(session, name, value, { expectedSessionId = null } = {}) {
-  const field = name === 'effort' ? 'effort' : 'model'
-  const controlSessionId = expectedSessionId || session.id
-  const controlChannel = session.channel
-  if (!controlChannel || authoritativeManagementSession(controlChannel, controlSessionId) !== session) {
-    return post(controlChannel || state.control, '⚠️ The native Pi session changed before the setting could be applied. No setting was changed; use fresh controls.')
-  }
-  if (!(session.pid && pidAlive(session.pid))) {
-    session[field] = value
-    saveState(state)
-    return post(controlChannel, `✅ ${name} → \`${value}\` — it will apply on the next resume.`)
-  }
-  let result
-  try {
-    if (authoritativeManagementSession(controlChannel, controlSessionId) !== session) {
-      return post(session.channel, '⚠️ The native session changed before the setting could be sent. No setting was changed; use fresh controls.')
-    }
-    result = await sendPiControl(session, name, value, 15000, controlSessionId)
-  }
-  catch (error) { return post(controlChannel, `⚠️ Pi could not change ${name}: ${String(error?.message || error).slice(0, 300)}`) }
-  if (authoritativeManagementSession(controlChannel, controlSessionId) !== session) {
-    return post(controlChannel, '⚠️ The native session changed while Pi was applying the setting. Refresh the session status before retrying.')
-  }
-  if (!result?.ok) return post(controlChannel, `❌ Pi rejected ${name}: ${String(result?.error || 'unknown error').slice(0, 300)}`)
-  if (result.model) session.model = result.model
-  if (result.model_name) session.modelName = result.model_name
-  if (result.effort) session.effort = result.effort
-  sessionMeta.set(session.id, { ...(sessionMeta.get(session.id) || {}), model: session.modelName || session.model, effort: session.effort })
-  saveState(state)
-  await updateTopic(session)
-  return post(controlChannel, `✅ ${name} → \`${name === 'model' ? session.model : session.effort}\``)
-}
-
 // Flags a provider-specific new session gets when none are given. Configurable because the
 // right default is a matter of taste and risk appetite (CCS_NEW_FLAGS).
 const defaultNewFlags = (provider = 'claude') => defaultNewFlagsFor(provider)
@@ -6574,21 +6026,7 @@ async function managementModelCatalog(session) {
       description: model.efforts?.length ? `Effort: ${model.efforts.join(', ')}` : 'Codex model',
     }))
   }
-  if (provider === 'pi') {
-    if (!(session.pid && pidAlive(session.pid))) return []
-    try {
-      const result = await sendPiControl(session, 'models')
-      if (!result?.ok) return []
-      return (result.models || []).map(model => ({
-        value: model.id,
-        label: model.name || model.id,
-        description: [model.reasoning ? 'thinking' : null, ...(model.input || [])].filter(Boolean).join(' · '),
-      }))
-    } catch (error) {
-      log('Pi model catalog unavailable', String(error))
-      return []
-    }
-  }
+
   const models = await getModels()
   if (models.length) {
     return claudeModelPickerOptions(models)
@@ -6617,14 +6055,14 @@ async function postModelManagement(channel, session, expectedSessionId = session
 function postEffortManagement(channel, session) {
   const provider = providerOf(session)
   const values = provider === 'codex' ? CODEX_EFFORTS
-    : provider === 'pi' ? PI_EFFORTS : ['low', 'medium', 'high', 'max']
+    : (['low', 'medium', 'high', 'max'])
   const meta = sessionMeta.get(session.id) || {}
   return postSlackMessage(channel, {
-    text: `Choose ${provider === 'pi' ? 'thinking' : 'effort'} for ${providerLabel(provider)}`,
+    text: `Choose ${('effort')} for ${providerLabel(provider)}`,
     blocks: settingPickerBlocks({
       sessionId: session.id,
       kind: 'effort',
-      title: `${providerLabel(provider)} ${provider === 'pi' ? 'thinking' : 'effort'}`,
+      title: `${providerLabel(provider)} ${('effort')}`,
       current: meta.effort || session.effort || 'unknown',
       values,
     }),
@@ -6714,7 +6152,10 @@ function appHomeSessions() {
 }
 
 function appHomeStats(sessions = appHomeSessions()) {
-  const counts = { claude: 0, codex: 0, pi: 0, active: 0, dormant: 0 }
+  const counts = {claude: 0,
+codex: 0,
+active: 0,
+dormant: 0}
   for (const session of sessions) {
     counts[session.provider]++
     counts[session.active ? 'active' : 'dormant']++
@@ -6751,7 +6192,7 @@ async function buildAppHomeView(userId, { sessionId = null, notice = '' } = {}) 
       const terminalOpen = Boolean(rows.find(row => row.sessionId === sessionId)?.attached)
       const provider = providerOf(current)
       const efforts = provider === 'codex' ? CODEX_EFFORTS
-        : provider === 'pi' ? PI_EFFORTS : ['low', 'medium', 'high', 'max']
+        : (['low', 'medium', 'high', 'max'])
       return appHomeSessionView({
         session: {
           id: sessionId,
@@ -6985,14 +6426,14 @@ const BRIDGE_COMMANDS = new Set(['claim', 'health', 'cleanup', 'team'])
 function commandHelp(provider = null) {
   const context = provider ? ` This channel currently uses *${providerLabel(provider)}*.` : ''
   return '*Slack Agent Bridge commands* — type `/sab-` to autocomplete; omit arguments on management commands for interactive controls.' + context + '\n' +
-    '`/sab-new <claude|codex|pi> [folder] [flags]` — choose or start a headless session\n' +
+    '`/sab-new <claude|codex> [folder] [flags]` — choose or start a headless session\n' +
     '`/sab-model [model]` · `/sab-effort [level]` · `/sab-flags [flags]` — choose, inspect, or change the active provider\n' +
     '`/sab-update [current|all]` · `/sab-stop` · `/sab-kill` — choose an update, interrupt, or end\n' +
-    '`/sab-switch <claude|codex|pi> [new]` — hand this channel to another provider\n' +
+    '`/sab-switch <claude|codex> [new]` — hand this channel to another provider\n' +
     '`/sab-status [provider]` · `/sab-usage [provider] …` — current session or control-channel overview\n' +
     '`/sab-terminal [open|close|list|open-all|close-all]` — manage optional Ghostty viewports\n' +
     '`/sab-team create|add|status|auto|manual|drain|resume|permissions|remove|close` — link sessions for safe agent delegation\n' +
-    '`/sab-run …` — Pi managed runs · `/sab-account …` — Claude subscriptions\n' +
+    '`/sab-account …` — Claude subscriptions\n' +
     '`/sab-health` · `/sab-cleanup` · `/sab-claim` — bridge-wide operations'
 }
 
@@ -7068,83 +6509,10 @@ async function dispatch(name, rest, channel, ingressProvider = null, request = n
     const failures = result.failures.map(item => `\`${item.session}\`: ${item.error}`).join('\n')
     return post(channel, `${operation === 'open' ? '🖥️' : '🌑'} ${result.message}${failures ? `\n${failures}` : ''}`)
   }
-  if (name === 'run') {
-    if (commandProvider !== 'pi') return post(channel, 'Managed runs are Pi-specific. Use `/sab-run` in an active Pi session channel.')
-    if (!channelSession) return post(channel, 'Use `/sab-run` in an active Pi session channel.')
-    if (!(channelSession.pid && pidAlive(channelSession.pid))) return post(channel, 'Pi is dormant — send a message to wake the session, then retry `/sab-run`.')
-    const parsed = parseManagedRunCommand(rest)
-    if (parsed.error) return post(channel, `❌ ${parsed.error}\nUsage: \`/sab-run [plan] <goal> [--minutes=N --turns=N --agents=N --reviews=N]\`, \`/sab-run mode [auto|always|native]\`, \`/sab-run direct <prompt>\`, or a control action.`)
-    const actions = {
-      start: 'managed-start', status: 'managed-status', approve: 'managed-approve',
-      pause: 'managed-pause', continue: 'managed-continue', cancel: 'managed-cancel',
-      policy: 'managed-policy', 'policy-status': 'managed-policy-status', direct: 'managed-direct',
-    }
-    if (parsed.action === 'start') {
-      await post(channel, parsed.mode === 'plan'
-        ? '🧭 Starting a read-only planning subagent…'
-        : '🧭 Starting a managed Pi run: planner → worker → independent reviewer…')
-    }
-    let result
-    try {
-      let value = null
-      if (parsed.action === 'start') {
-        value = {
-            goal: parsed.goal, mode: parsed.mode, budgets: parsed.budgets,
-            privateContext: artifactDeliveryContext(channelSession, request),
-          }
-      } else if (parsed.action === 'policy') value = { policy: parsed.policy }
-      else if (parsed.action === 'direct') {
-        value = { goal: parsed.goal, privateContext: artifactDeliveryContext(channelSession, request) }
-        rememberInjected(channelSession.id, `${value.goal}${value.privateContext}`)
-      }
-      result = await sendPiControl(channelSession, actions[parsed.action], value)
-    } catch (error) {
-      return post(channel, `⚠️ Managed Pi command failed: ${String(error?.message || error).slice(0, 500)}`)
-    }
-    if (!result?.ok) return post(channel, `❌ ${String(result?.error || 'Pi rejected the managed-run command.').slice(0, 1000)}`)
-    const managed = result.managed
-    if (parsed.action === 'status' || parsed.action === 'policy-status') {
-      const policy = normalizeManagedPolicy(result.managed_policy)
-      if (!managed) {
-        const routing = result.routing?.status === 'routing'
-          ? ` Pi is currently assessing a prompt (${String(result.routing.reason || 'pending decision').slice(0, 500)}).`
-          : ''
-        return post(channel, `Adaptive Pi routing is \`${policy}\`. No managed run exists in this Pi session.${routing}`)
-      }
-      const plan = Array.isArray(result.plan) && result.plan.length
-        ? '\n' + result.plan.map(step => `${step.status === 'done' ? '✅' : '▫️'} ${Number(step.id) || '•'}. ${String(step.text || '').slice(0, 1000)}`).join('\n')
-        : ''
-      return postMd(channel,
-        `*Managed run ${managed.id.slice(0, 8)}*\n` +
-        `| Field | Value |\n|---|---|\n` +
-        `| Adaptive policy | ${policy} |\n` +
-        `| Status | ${managed.status} · ${managed.phase} |\n` +
-        `| Goal | ${String(managed.goal || '').replace(/\|/g, '\\|')} |\n` +
-        `| Progress | ${managed.completedSteps}/${managed.totalSteps} steps |\n` +
-        `| Parent turns | ${managed.counters?.parentTurns || 0}/${managed.budgets?.maxParentTurns || '—'} |\n` +
-        `| Subagents | ${managed.counters?.subagents || 0}/${managed.budgets?.maxSubagents || '—'} |\n` +
-        `| Review cycles | ${managed.counters?.reviewCycles || 0}/${managed.budgets?.maxReviewCycles || '—'} |${plan}`)
-    }
-    const replies = {
-      start: `✅ Managed run \`${managed?.id?.slice(0, 8) || 'started'}\` accepted. The plan will appear here before execution.`,
-      policy: `✅ Adaptive Pi routing → \`${normalizeManagedPolicy(result.managed_policy)}\``,
-      direct: '▶️ Sent directly to native Pi without managed routing.',
-      approve: '▶️ Plan approved; managed execution started.',
-      pause: '⏸️ Managed run paused. Resume with `/sab-run continue`.',
-      continue: '▶️ Managed run continuing from persisted state.',
-      cancel: result.routing_cancelled
-        ? '🛑 Adaptive routing cancelled; the queued prompt was not delivered.'
-        : '🛑 Managed run cancelled; its history remains in the native Pi session.',
-    }
-    return post(channel, replies[parsed.action])
-  }
+
   if (name === 'switch') {
     if (!channelSession) return post(channel, `Use \`${cmd('switch')}\` in an active ${providerLabel(commandProvider)} session channel.`)
-    if (channelSession.managed?.status === 'active' || channelSession.piRouting?.status === 'routing') {
-      return post(channel, channelSession.piRouting?.status === 'routing'
-        ? '⏳ This Pi session is assessing a prompt. Cancel it with `/sab-stop` before switching providers.'
-        : '⏳ This Pi session has an active managed run. Pause it with `/sab-run pause` before switching providers.')
-    }
+
     if (!rest.length && !ingressProvider) return postSwitchManagement(channel, channelSession)
     const words = rest.map(word => word.toLowerCase())
     const replaceMissing = words.includes('new')
@@ -7185,12 +6553,8 @@ async function dispatch(name, rest, channel, ingressProvider = null, request = n
         `| Branch | ${branch || '—'}${worktree ? ` · wt:${worktree}` : ''} |\n` +
         `| Model | ${meta.model || readModel(session) || '—'} |\n` +
         `| Effort | ${meta.effort || session.effort || '—'} |\n` +
-        (providerOf(session) === 'pi'
-          ? `| Adaptive routing | ${normalizeManagedPolicy(session.managedPolicy)}${session.piRouting?.status === 'routing' ? ' · assessing prompt' : ''} |\n`
-          : '') +
-        (providerOf(session) === 'pi' && session.managed
-          ? `| Managed run | ${session.managed.status} · ${session.managed.phase} · ${session.managed.completedSteps}/${session.managed.totalSteps} steps |\n`
-          : '') +
+        (('')) +
+        (('')) +
         standbys.map(({ provider, session: standby }) => `| Standby leg | ${providerLabel(provider)} · ${standby.id.slice(0, 8)} · ${standby.pid && pidAlive(standby.pid) ? '⚠️ unexpectedly live' : 'preserved'} |\n`).join('') +
         (lineage?.transition ? `| Transition | ${lineage.transition.phase} → ${providerLabel(lineage.transition.target.provider)} |\n` : '') +
         `| Changes | ${changes} |` +
@@ -7206,7 +6570,7 @@ async function dispatch(name, rest, channel, ingressProvider = null, request = n
     let statusProvider = ingressProvider
     if (!statusProvider && rest.length) {
       statusProvider = normalizeProvider(rest[0], null)
-      if (!statusProvider || rest.length > 1) return post(channel, 'Usage: `/sab-status [claude|codex|pi]`')
+      if (!statusProvider || rest.length > 1) return post(channel, 'Usage: `/sab-status [claude|codex]`')
     }
     const rows = Object.values(state.sessions).filter(s => !statusProvider || providerOf(s) === statusProvider).map(s => {
       const alive = s.pid && pidAlive(s.pid)
@@ -7222,8 +6586,7 @@ async function dispatch(name, rest, channel, ingressProvider = null, request = n
     const sess = Object.values(state.sessions)
     const active = sess.filter(s => s.pid && pidAlive(s.pid)).length
     const codex = sess.filter(s => providerOf(s) === 'codex').length
-    const pi = sess.filter(s => providerOf(s) === 'pi').length
-    const claude = sess.length - codex - pi
+    const claude = sess.length - codex
     const up = Math.round((Date.now() - BOOT_TS) / 1000)
     const hms = up < 3600 ? `${Math.round(up / 60)}m` : `${(up / 3600).toFixed(1)}h`
     const statusQueue = liveStatuses.snapshot()
@@ -7231,7 +6594,7 @@ async function dispatch(name, rest, channel, ingressProvider = null, request = n
       `| Bridge health | |\n|---|---|\n` +
       `| Uptime | ${hms} |\n` +
       `| Sessions | ${active} active, ${sess.length - active} dormant |\n` +
-      `| Providers | ${claude} Claude, ${codex} Codex, ${pi} Pi |\n` +
+      `| Providers | ${claude} Claude, ${codex} Codex |\n` +
       `| Status queue | ${statusQueue.priority} cleanup, ${statusQueue.normal} cosmetic${statusQueue.active ? ' · active' : ''} |\n` +
       `| Agent streams attached | ${streams.size} |\n` +
       `| Open permission prompts | ${Object.keys(state.perms).length} |`)
@@ -7241,9 +6604,7 @@ async function dispatch(name, rest, channel, ingressProvider = null, request = n
       ? Object.values(state.sessions).find(s => (!ingressProvider || providerOf(s) === ingressProvider) && s.id.startsWith(rest[0]))
       : sessionByChannel(channel)
     if (!target) return post(channel, `No matching session — use \`${cmd('kill')}\` in a session channel, or \`${cmd('kill')} <id-prefix>\`.`)
-    if (providerOf(target) === 'pi' && target.pid && pidAlive(target.pid) && target.managed?.status === 'active') {
-      try { await sendPiControl(target, 'managed-cancel') } catch {}
-    }
+
     if (target.tmux) await tmuxKill(target.tmux)
     if (target.pid && pidAlive(target.pid)) { try { process.kill(target.pid) } catch {} }
     stopPoller(target)
@@ -7296,13 +6657,7 @@ async function dispatch(name, rest, channel, ingressProvider = null, request = n
       }
       return setCodexSetting(session, name, val, { expectedSessionId })
     }
-    if (provider === 'pi') {
-      const val = name === 'effort' ? rest.join(' ').toLowerCase() : rest.join(' ')
-      if (name === 'effort' && !PI_EFFORTS.includes(val)) {
-        return post(channel, `❌ Unsupported Pi thinking level \`${val}\`. Use: ${PI_EFFORTS.join(' · ')}`)
-      }
-      return setPiSetting(session, name, val, { expectedSessionId })
-    }
+
     if (!(session.pid && pidAlive(session.pid))) return post(channel, 'Session not active — send a message first to wake it.')
     let val = rest.join(' ')
     if (name === 'model') {
@@ -7342,14 +6697,7 @@ async function dispatch(name, rest, channel, ingressProvider = null, request = n
     clearTeamTurn(session)
     saveStateNow(state)
     const activeProvider = providerOf(session)
-    if (activeProvider === 'pi') {
-      let result
-      try { result = await sendPiControl(session, 'abort') }
-      catch (error) { return post(channel, `⚠️ Pi interrupt failed: ${String(error?.message || error).slice(0, 200)}`) }
-      await failTeamTaskForSession(session, 'The delegated worker turn was interrupted by the owner.')
-      if (result?.managed?.routing_cancelled) return post(channel, '⎋ *Interrupted* adaptive routing; the queued prompt was not delivered.')
-      if (result?.managed?.status === 'paused') return post(channel, '⎋ *Interrupted* the turn and paused its managed run. Resume with `/sab-run continue`.')
-    } else if (activeProvider === 'codex') {
+    if (activeProvider === 'codex') {
       const interruptedTurnStartedAt = session.codexTurnStartedAt ?? null
       try { await tmuxInterrupt(session.tmux, 'codex') }
       catch (error) { return post(channel, `⚠️ Codex interrupt could not be sent: ${String(error?.message || error).slice(0, 200)}`) }
@@ -7383,8 +6731,7 @@ async function dispatch(name, rest, channel, ingressProvider = null, request = n
       await post(channel, '⏳ Crunching usage across providers…')
       for (const provider of PROVIDERS) {
         try {
-          if (provider === 'pi') await piUsageReport(channel, sub, rest[1])
-          else if (sub === 'limits') {
+          if (sub === 'limits') {
             if (provider === 'claude') await usageLimits(channel)
           } else if (sub === 'days' || sub === 'daily') await usageDays(channel, rest[1], provider)
           else if (sub === 'models') await usageModels(channel, provider)
@@ -7393,7 +6740,7 @@ async function dispatch(name, rest, channel, ingressProvider = null, request = n
       }
       return
     }
-    if (usageProvider === 'pi') return piUsageReport(channel, sub, rest[1])
+
     if (sub === 'limits') {
       if (usageProvider === 'codex') return post(channel, 'Codex plan-limit windows are not exposed by ccusage; token and cost reports are available here.')
       return usageLimits(channel) // instant — no transcript scan
@@ -7440,8 +6787,7 @@ async function dispatch(name, rest, channel, ingressProvider = null, request = n
     if (!session) return post(channel, `Use \`${cmd('flags')}\` in a ${providerLabel(commandProvider)} session channel.`)
     const provider = providerOf(session)
     const alias = provider === 'claude' ? ' (`--dsp` works too)'
-      : provider === 'codex' ? ' (`--yolo` works too)'
-        : ' (Pi tools are unrestricted by default; `--approve` only controls project resources)'
+      : ' (`--yolo` works too)'
     const allowed = allowedFlags(provider).map(f => `\`${f}\``).join(' · ') + alias
     if (!rest.length) {
       const cur = displayFlags(session)
@@ -7460,11 +6806,11 @@ async function dispatch(name, rest, channel, ingressProvider = null, request = n
     if (!ingressProvider) {
       if (!rest.length) return postNewSessionManagement(channel)
       const requested = normalizeProvider(rest[0], null)
-      if (!requested) return post(channel, 'Usage: `/sab-new <claude|codex|pi> [folder] [flags]`')
+      if (!requested) return post(channel, 'Usage: `/sab-new <claude|codex> [folder] [flags]`')
       commandProvider = requested
       rest = rest.slice(1)
     }
-    const providerFlag = rest.find(arg => arg === '--codex' || arg === '--claude' || arg === '--pi')
+    const providerFlag = rest.find(arg => arg === '--codex' || arg === '--claude')
     if (providerFlag) {
       const requested = providerFlag.slice(2)
       return post(channel, `❌ Provider flags are retired. Use \`/sab-new ${requested} [folder] [flags]\`.`)
@@ -7480,11 +6826,7 @@ async function dispatch(name, rest, channel, ingressProvider = null, request = n
 // synchronous; Slack/tmux effects happen only after the preceding state is on
 // disk, so a daemon restart can reconcile without launching or prompting twice.
 async function launchAutomation(record) {
-  if (record.provider === 'pi' && state.control) {
-    pendingSpawnChannels.set(record.tmux, state.control)
-    const timer = setTimeout(() => pendingSpawnChannels.delete(record.tmux), 10 * 60000)
-    timer.unref?.()
-  }
+
   await executionNodes.spawn(LOCAL_NODE_ID, {
     cwd: record.cwd,
     args: record.flags,
@@ -7507,18 +6849,13 @@ async function waitForAutomationInput(session) {
   await waitForProviderInput(session, {
     isProcessAlive: pidAlive,
     isTmuxAlive: tmuxAlive,
-    piStream: pid => streams.get(pid),
     sleep,
   })
 }
 
 async function injectAutomationPrompt(session, prompt) {
   if (!(session.pid && pidAlive(session.pid))) throw new Error('the correlated provider process is not alive')
-  if (providerOf(session) === 'pi') {
-    if (!injectQueuedPiPrompt(session.pid, prompt)) throw new Error('the Pi input stream is not connected')
-    rememberInjected(session.id, prompt)
-    return
-  }
+
   if (!session.tmux || !(await tmuxAlive(session.tmux))) throw new Error('the correlated tmux session is not alive')
   rememberInjected(session.id, prompt)
   await tmuxPaste(session.tmux, prompt)
@@ -7527,9 +6864,6 @@ async function injectAutomationPrompt(session, prompt) {
 async function terminateAutomation(record) {
   const session = validateAutomationStopTarget(state, record)
 
-  if (session && providerOf(session) === 'pi' && session.pid && pidAlive(session.pid) && session.managed?.status === 'active') {
-    try { await sendPiControl(session, 'managed-cancel') } catch {}
-  }
   if (record.tmux) {
     await terminateAutomationTmux(record.tmux, {
       isAlive: tmuxAlive,
@@ -7814,146 +7148,7 @@ http.createServer(async (req, res) => {
     }
     return
   }
-  if (url.pathname === '/pi/event' && req.method === 'POST') {
-    res.setHeader('content-type', 'application/json')
-    let raw = ''
-    for await (const chunk of req) raw += chunk
-    try {
-      const event = JSON.parse(raw || '{}')
-      await onHook({
-        ...event,
-        hook_event_name: event.event,
-        transcript_path: event.session_file,
-      }, url.searchParams.get('ppid'), url.searchParams.get('tmux'),
-      req.headers['x-ccs-flags'], null, 'pi')
-      res.end(JSON.stringify({ ok: true }))
-    } catch (error) {
-      log('Pi event error', String(error))
-      res.writeHead(400); res.end(JSON.stringify({ ok: false }))
-    }
-    return
-  }
-  if (url.pathname === '/pi/permission' && req.method === 'POST') {
-    res.setHeader('content-type', 'application/json')
-    let raw = ''
-    for await (const chunk of req) raw += chunk
-    try {
-      const request = JSON.parse(raw || '{}')
-      const pid = await resolveAgentPid(url.searchParams.get('ppid'), 'pi')
-      const tmux = String(url.searchParams.get('tmux') || '')
-      const session = state.sessions[request.session_id] || sessionByPid(pid)
-      const transition = transitionForTarget(state, 'pi', tmux)
-      const provisionalChannel = transition?.transition.target.sid === session?.id ? transition.channel : null
-      const channel = session?.channel || provisionalChannel
-      const validClaim = tmux && await validTmuxClaim(pid, tmux)
-      if (!channel || providerOf(session) !== 'pi' || !validClaim ||
-          (session.pid && Number(session.pid) !== Number(pid)) || (session.tmux && session.tmux !== tmux)) {
-        return res.end(JSON.stringify({ behavior: 'deny', reason: 'Pi session identity was not authorized.' }))
-      }
-      const rid = permissionId()
-      let preview = ''
-      try { preview = JSON.stringify(request.tool_input ?? {}, null, 2) } catch { preview = String(request.tool_input || '') }
-      const prompt = {
-        request_id: rid, provider: 'pi', tool_name: request.tool_name || 'tool',
-        description: 'Safe-mode approval requested by Pi.', input_preview: preview,
-      }
-      const ts = await postPermissionPrompt(channel, prompt)
-      state.perms[rid] = { pid, channel, ts, tool: prompt.tool_name, provider: 'pi' }
-      saveState(state)
-      const timer = setTimeout(async () => {
-        const waiter = piPermissionWaiters.get(rid)
-        if (!waiter) return
-        piPermissionWaiters.delete(rid); delete state.perms[rid]; saveState(state)
-        if (!res.writableEnded) res.end(JSON.stringify({ behavior: 'deny', reason: 'Permission request expired.' }))
-        await web.chat.update({ channel, ts, text: `⌛ Expired ${prompt.tool_name}`, blocks: [
-          { type: 'section', text: { type: 'mrkdwn', text: `⌛ *Permission request expired* \`${escapeText(prompt.tool_name)}\`` } },
-        ] }).catch(() => {})
-      }, 570000)
-      piPermissionWaiters.set(rid, { res, timer, provider: 'pi', kind: 'tool' })
-      res.on('close', () => {
-        const waiter = piPermissionWaiters.get(rid)
-        if (!waiter || waiter.res !== res || res.writableEnded) return
-        clearTimeout(waiter.timer); piPermissionWaiters.delete(rid); delete state.perms[rid]; saveState(state)
-      })
-    } catch (error) {
-      log('Pi permission error', String(error))
-      if (!res.writableEnded) res.end(JSON.stringify({ behavior: 'deny', reason: 'Permission relay failed.' }))
-    }
-    return
-  }
-  if (url.pathname === '/pi/trust' && req.method === 'POST') {
-    res.setHeader('content-type', 'application/json')
-    let raw = ''
-    for await (const chunk of req) raw += chunk
-    try {
-      const request = JSON.parse(raw || '{}')
-      const pid = await resolveAgentPid(url.searchParams.get('ppid'), 'pi')
-      const tmux = String(url.searchParams.get('tmux') || '')
-      if (!tmux || !(await validTmuxClaim(pid, tmux))) return res.end(JSON.stringify({ trusted: 'undecided' }))
-      const candidate = sessionByPid(pid) || Object.values(state.sessions).find(item => item.tmux === tmux)
-      const session = candidate && providerOf(candidate) === 'pi' &&
-        (!candidate.pid || Number(candidate.pid) === Number(pid)) ? candidate : null
-      const transition = transitionForTarget(state, 'pi', tmux)
-      const channel = session?.channel || transition?.channel || pendingSpawnChannels.get(tmux)
-      if (!channel) return res.end(JSON.stringify({ trusted: 'undecided' }))
-      const rid = permissionId()
-      const prompt = {
-        request_id: rid, provider: 'pi', tool_name: 'project resources',
-        description: `Trust Pi project-local settings, extensions, skills, and packages in ${String(request.cwd || '').slice(0, 500)}?`,
-        input_preview: 'AGENTS.md and CLAUDE.md load regardless. Approval may execute project-local Pi extensions with your macOS permissions.',
-      }
-      const ts = await postPermissionPrompt(channel, prompt)
-      state.perms[rid] = { pid, channel, ts, tool: prompt.tool_name, provider: 'pi', kind: 'trust' }
-      saveState(state)
-      const timer = setTimeout(async () => {
-        const waiter = piPermissionWaiters.get(rid)
-        if (!waiter) return
-        piPermissionWaiters.delete(rid); delete state.perms[rid]; saveState(state)
-        if (!res.writableEnded) res.end(JSON.stringify({ trusted: 'undecided' }))
-        await web.chat.update({ channel, ts, text: '⌛ Pi project trust request expired', blocks: [
-          { type: 'section', text: { type: 'mrkdwn', text: '⌛ *Pi project trust request expired* — decide locally in Ghostty or retry the launch.' } },
-        ] }).catch(() => {})
-      }, 570000)
-      piPermissionWaiters.set(rid, { res, timer, provider: 'pi', kind: 'trust' })
-      res.on('close', () => {
-        const waiter = piPermissionWaiters.get(rid)
-        if (!waiter || waiter.res !== res || res.writableEnded) return
-        clearTimeout(waiter.timer); piPermissionWaiters.delete(rid); delete state.perms[rid]; saveState(state)
-      })
-    } catch (error) {
-      log('Pi trust relay error', String(error))
-      if (!res.writableEnded) res.end(JSON.stringify({ trusted: 'undecided' }))
-    }
-    return
-  }
-  if (url.pathname === '/pi/stream' && req.method === 'GET') {
-    const pid = await resolveAgentPid(url.searchParams.get('ppid'), 'pi')
-    const tmux = String(url.searchParams.get('tmux') || '')
-    const session = sessionByPid(pid)
-    const target = transitionForTarget(state, 'pi', tmux)
-    if (!tmux || !(await validTmuxClaim(pid, tmux)) ||
-        (!target && (!session || providerOf(session) !== 'pi' || session.tmux !== tmux))) {
-      res.writeHead(403); res.end(); return
-    }
-    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })
-    res.write(': connected\n\n')
-    streams.set(pid, {
-      res,
-      provider: 'pi',
-      capabilities: parsePiStreamCapabilities(url.searchParams.get('capabilities')),
-    })
-    log('Pi extension stream attached pid', pid)
-    // An old Pi stream can reconnect after maintenance is reserved but before
-    // that process is stopped. Only a non-restarting stream (including the
-    // replacement after its SessionStart cleared the restart fence) may resume
-    // the ordered input drain.
-    if (session && !restarting.has(session.id) && completedSessionStartTmux.get(session.id) === tmux) {
-      scheduleSessionInputDrain(session, 'pi', tmux, 0)
-    }
-    const ka = setInterval(() => { try { res.write(': ka\n\n') } catch {} }, 15000)
-    req.on('close', () => { clearInterval(ka); if (streams.get(pid)?.res === res) streams.delete(pid) })
-    return
-  }
+
   // Agent-facing artifact delivery. An opaque grant is minted only for an
   // owner/whitelisted Slack message; process ancestry + tmux bind the caller to
   // that same live provider session. The caller supplies paths, never a Slack
@@ -8187,7 +7382,7 @@ async function handleAppHomeAction(body, action, parsed) {
   if (parsed.kind === 'effort') {
     const value = action.selected_option?.value
     const provider = session && providerOf(session)
-    const supported = provider === 'codex' ? CODEX_EFFORTS : provider === 'pi' ? PI_EFFORTS : ['low', 'medium', 'high', 'max']
+    const supported = provider === 'codex' ? CODEX_EFFORTS : (['low', 'medium', 'high', 'max'])
     if (!session || parsed.action !== 'select' || !supported.includes(value)) {
       return publishAppHome(userId, { sessionId: session?.id, notice: '⚠️ Invalid or stale effort control. No setting was changed.' })
     }
@@ -8279,7 +7474,7 @@ async function handleManagementAction(body, action, parsed) {
     const value = action.selected_option?.value
     if (!session || parsed.action !== 'select' || !value) return post(channel, '❌ Invalid effort selection.')
     const provider = providerOf(session)
-    const supported = provider === 'codex' ? CODEX_EFFORTS : provider === 'pi' ? PI_EFFORTS : ['low', 'medium', 'high', 'max']
+    const supported = provider === 'codex' ? CODEX_EFFORTS : (['low', 'medium', 'high', 'max'])
     if (!supported.includes(value)) return post(channel, '⚠️ That effort is no longer supported. No setting was changed; run `/sab-effort` for a fresh list.')
     return dispatch('effort', [value], channel, null, { userId: body.user.id, expectedSessionId })
   }
@@ -8322,7 +7517,6 @@ async function handleManagementAction(body, action, parsed) {
   return post(channel, '❌ Unknown SAB management control. Run `/sab-status` for fresh controls.')
 }
 
-
 async function handleSocketSlashCommand({ body }) {
   try {
     const parsed = parseSlackCommand(body.command)
@@ -8336,7 +7530,7 @@ async function handleSocketSlashCommand({ body }) {
       await respondEphemeral(body, '👑 You own this bridge now. Check your private bridge control channel.')
       if (state.control) {
         try { await web.conversations.invite({ channel: state.control, users: USER }) } catch {}
-        await post(state.control, `👑 <@${USER}> claimed this bridge. Type \`/sab-\` to see the unified commands; start with \`/sab-new <claude|codex|pi>\`.`).catch(() => {})
+        await post(state.control, `👑 <@${USER}> claimed this bridge. Type \`/sab-\` to see the unified commands; start with \`/sab-new <claude|codex>\`.`).catch(() => {})
       }
       return
     }
@@ -8527,7 +7721,7 @@ async function selfUpdate(trigger) {
   }
   const after = pkgVersion()
   log(`self-update: v${before} → v${after}; restarting when idle`)
-  for (let i = 0; i < 120 && (pollers.size || codexPollers.size || piPollers.size); i++) await sleep(5000) // prefer restarting between turns (≤10 min)
+  for (let i = 0; i < 120 && (pollers.size || codexPollers.size); i++) await sleep(5000) // prefer restarting between turns (≤10 min)
   if (state.control) await post(state.control, `⬆️ *Bridge updated* v${before} → v${after} — restarting the daemon. Sessions keep running.`).catch(() => {})
   setTimeout(() => process.exit(0), 800) // flush the post; launchd (KeepAlive) brings us back on the new code
 }
@@ -8618,7 +7812,7 @@ setInterval(async () => {
       }
       if (USER) { // fresh installs are unclaimed; /sab-claim invites the owner later
         try { await web.conversations.invite({ channel: state.control, users: USER }) } catch {}
-        await post(state.control, '🤖 *Bridge online.* Type `/sab-` to see the unified commands; start with `/sab-new <claude|codex|pi>`.')
+        await post(state.control, '🤖 *Bridge online.* Type `/sab-` to see the unified commands; start with `/sab-new <claude|codex>`.')
       }
     } catch (e) {
       if (e?.data?.error === 'name_taken') {

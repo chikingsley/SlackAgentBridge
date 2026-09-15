@@ -1,27 +1,39 @@
 {
   "name": "slack-agent-bridge",
   "version": "2.1.0",
-  "description": "Control, hand off, and coordinate headless-capable Claude Code, Codex CLI, and Pi sessions from private Slack channels.",
+  "description": "Control, hand off, and coordinate Claude Code and Codex CLI sessions from private Slack channels.",
   "private": true,
   "type": "module",
   "license": "MIT",
   "author": "Sergej Berišaj",
-  "homepage": "https://github.com/SergioTCG/SlackAgentBridge",
+  "homepage": "https://github.com/chikingsley/SlackAgentBridge",
   "repository": {
     "type": "git",
-    "url": "https://github.com/SergioTCG/SlackAgentBridge.git"
+    "url": "https://github.com/chikingsley/SlackAgentBridge.git"
   },
   "bugs": {
-    "url": "https://github.com/SergioTCG/SlackAgentBridge/issues"
+    "url": "https://github.com/chikingsley/SlackAgentBridge/issues"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12"
   },
   "scripts": {
     "audit": "npm audit --omit=dev",
     "check": "node scripts/check-doc-links.mjs && node scripts/check-branding.mjs",
     "daemon": "node daemon/daemon.mjs",
-    "test": "node --test"
+    "test": "vitest run",
+    "build": "tsc",
+    "pretest": "npm run build",
+    "predirect": "npm run build",
+    "direct": "node dist/direct/main.js",
+    "test:direct": "vitest run",
+    "premanifest:direct": "npm run build",
+    "manifest:direct": "node dist/direct/manifest.js",
+    "test:legacy": "node --test tests/*.test.mjs",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.tests.json",
+    "prebridge": "npm run build",
+    "bridge": "node dist/direct/hub-main.js",
+    "test:all": "npm test && npm run test:legacy"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
@@ -30,5 +42,10 @@
     "ccusage": "^20.0.19",
     "ws": "^8.18.3",
     "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
   }
 }

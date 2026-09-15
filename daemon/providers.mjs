@@ -1,14 +1,11 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-export const PROVIDERS = Object.freeze(['claude', 'codex', 'pi'])
-export const PI_EXACT_SESSION_CONTROL_CAPABILITY = 'exact-session-controls-v1'
-const PI_STREAM_CAPABILITY_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/
+export const PROVIDERS = Object.freeze(['claude', 'codex'])
 
 const PROVIDER_META = Object.freeze({
   claude: Object.freeze({ label: 'Claude Code', command: 'claude' }),
   codex: Object.freeze({ label: 'Codex', command: 'codex' }),
-  pi: Object.freeze({ label: 'Pi', command: 'pi' }),
 })
 
 export function normalizeProvider(value, fallback = 'claude') {
@@ -20,11 +17,15 @@ export function normalizeProvider(value, fallback = 'claude') {
 // as Claude keeps existing state backward-compatible and avoids a risky bulk
 // migration of the live bridge state file.
 export function providerOf(session) {
-  return session?.provider === 'codex' || session?.provider === 'pi' ? session.provider : 'claude'
+  return session?.provider == null ? 'claude' : normalizeProvider(session.provider)
 }
 
 export const providerLabel = provider => PROVIDER_META[normalizeProvider(provider)]?.label || 'Claude Code'
-export const providerCommand = provider => PROVIDER_META[normalizeProvider(provider)]?.command || 'claude'
+export function providerCommand(provider) {
+  const command = PROVIDER_META[normalizeProvider(provider)]?.command
+  if (!command) throw new Error(`Unsupported provider: ${provider}`)
+  return command
+}
 export const slackCommand = (_provider, name) => `/sab-${name}`
 
 // A provider executable may be replaced in place (not only through a versioned
@@ -42,19 +43,6 @@ export function executableCacheKey(command) {
   }
 }
 
-export function parsePiStreamCapabilities(value) {
-  return [...new Set(String(value || '').split(',')
-    .map(capability => capability.trim())
-    .filter(capability => PI_STREAM_CAPABILITY_RE.test(capability)))]
-    .slice(0, 16)
-}
-
-export function piMutableControlAllowed(capabilities, action, expectedSessionId) {
-  if (action !== 'model' && action !== 'effort') return true
-  return Boolean(expectedSessionId && Array.isArray(capabilities) &&
-    capabilities.includes(PI_EXACT_SESSION_CONTROL_CAPABILITY))
-}
-
 export function claudeModelPickerOptions(models) {
   return (Array.isArray(models) ? models : []).map(model => ({
     // Slack controls are exact selections. Bare textual family aliases keep
@@ -70,7 +58,7 @@ export function parseSlackCommand(command) {
   if (neutral) return { provider: null, name: neutral[1], legacy: false }
   // Migration-only ingress shim: old manifests remain usable while the owner
   // installs the canonical v2 manifest. These aliases are not advertised.
-  const match = /^\/(cc|codex|pi)-([a-z][a-z0-9-]*)$/.exec(String(command || ''))
+  const match = /^\/(cc|codex)-([a-z][a-z0-9-]*)$/.exec(String(command || ''))
   if (!match) return null
   return {
     provider: match[1] === 'cc' ? 'claude' : match[1],
@@ -104,16 +92,9 @@ const CODEX_VALUE_FLAGS = [
 ]
 const MODEL_VALUE = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/
 
-// Pi's built-in tools are unrestricted by default. `--approve` controls only
-// project-local resources; `--safe` is consumed by `sab new pi` and enables the SAB
-// extension's Slack permission gate. Remote values remain inline so a value can
-// never be reinterpreted as another option after Slack tokenization.
-const PI_FLAGS = new Set(['--approve', '--no-approve', '--offline', '--safe'])
-const PI_VALUE_FLAGS = ['--provider=', '--model=', '--thinking=']
-
 export function allowedFlags(provider) {
   if (provider === 'codex') return [...CODEX_FLAGS, ...CODEX_VALUE_FLAGS.map(f => f + '<value>')]
-  if (provider === 'pi') return [...PI_FLAGS, ...PI_VALUE_FLAGS.map(f => f + '<value>')]
+
   return [...CLAUDE_FLAGS]
 }
 
@@ -123,13 +104,7 @@ export function normalizeLaunchFlag(provider, flag) {
     const normalized = CLAUDE_ALIASES[raw] || raw
     return CLAUDE_FLAGS.has(normalized.split('=')[0]) ? normalized : null
   }
-  if (provider === 'pi') {
-    if (PI_FLAGS.has(raw)) return raw
-    if (raw.startsWith('--thinking=')) return PI_EFFORTS.includes(raw.slice('--thinking='.length)) ? raw : null
-    return PI_VALUE_FLAGS.some(prefix => raw.startsWith(prefix) && raw.length > prefix.length)
-      ? raw
-      : null
-  }
+
   const normalized = CODEX_ALIASES[raw] || raw
   if (CODEX_FLAGS.has(normalized)) return normalized
   return CODEX_VALUE_FLAGS.some(prefix => normalized.startsWith(prefix) && normalized.length > prefix.length)
@@ -207,9 +182,7 @@ export function normalizeRemoteLaunchFlags(provider, input) {
 export function defaultNewFlagsFor(provider, env = process.env) {
   const configured = provider === 'codex'
     ? env.CCS_CODEX_NEW_FLAGS || CODEX_DANGEROUS_FLAG
-    : provider === 'pi'
-      ? env.CCS_PI_NEW_FLAGS || ''
-      : env.CCS_NEW_FLAGS || '--dangerously-skip-permissions'
+    : (env.CCS_NEW_FLAGS || '--dangerously-skip-permissions')
   return String(configured).split(/\s+/).filter(Boolean)
 }
 
@@ -228,6 +201,7 @@ export function codexFlagsWithoutInitialPrompt(flags, sessionId) {
 
 export function displayFlagsFor(session) {
   const provider = providerOf(session)
+  if (!provider) throw new Error(`Unsupported provider: ${session?.provider}`)
   const toks = String(session?.launchFlags || '').trim().split(/\s+/).filter(Boolean)
   const out = []
   for (let i = 0; i < toks.length; i++) {
@@ -237,8 +211,6 @@ export function displayFlagsFor(session) {
       if (t === '--continue' || t === '-c') continue
     } else if (provider === 'codex' && t === 'resume') {
       continue
-    } else if (provider === 'pi' && (t === '--session' || t === '-s')) {
-      i++; continue
     }
     out.push(t)
   }
@@ -250,7 +222,6 @@ const tomlString = value => JSON.stringify(String(value))
 
 export function resumeArgsFor(session, {
   defaultClaudeFlags = '--dangerously-skip-permissions', defaultCodexFlags = CODEX_DANGEROUS_FLAG,
-  defaultPiFlags = '',
   initialPrompt = null,
 } = {}) {
   const provider = providerOf(session)
@@ -267,20 +238,6 @@ export function resumeArgsFor(session, {
     if (session.model) keep.push('--model', session.model)
     if (session.effort) keep.push('--effort', session.effort)
     return [...keep, '--resume', session.id]
-  }
-
-  if (provider === 'pi') {
-    const keep = []
-    for (let i = 0; i < toks.length; i++) {
-      const t = toks[i]
-      if (t === '--model' || t === '--provider' || t === '--thinking') { i++; continue }
-      if (t.startsWith('--model=') || t.startsWith('--provider=') || t.startsWith('--thinking=')) continue
-      keep.push(t)
-    }
-    if (!keep.length) keep.push(...String(defaultPiFlags).split(/\s+/).filter(Boolean))
-    if (session.model) keep.push(`--model=${session.model}`)
-    if (session.effort) keep.push(`--thinking=${session.effort}`)
-    return [...keep, '--session', session.id]
   }
 
   const keep = []
@@ -318,7 +275,6 @@ export function switchTargetLaunch(provider, targetSession = null, env = process
     const args = resumeArgsFor(targetSession, {
       defaultClaudeFlags: env.CCS_RESUME_FLAGS || '--dangerously-skip-permissions',
       defaultCodexFlags: env.CCS_CODEX_RESUME_FLAGS || CODEX_DANGEROUS_FLAG,
-      defaultPiFlags: env.CCS_PI_RESUME_FLAGS || '',
     })
     return { kind: 'resume', args, effectiveFlags: displayFlagsFor(targetSession) }
   }
@@ -369,10 +325,7 @@ export function targetStartupState(provider, pane) {
     if (/Update now \(runs [^)]+\)/i.test(visible)) return 'update'
     return 'starting'
   }
-  if (provider === 'pi') {
-    if (/trust|approve project|project resources/i.test(visible)) return 'trust'
-    return 'starting' // Pi readiness is its authenticated native extension stream.
-  }
+
   if (/shift\+tab to cycle|bypass permissions/i.test(visible) && /(?:^|\n)\s*[❯>]\s*/.test(visible)) return 'ready'
   if (/trust|development channels|approve/i.test(visible)) return 'trust'
   return 'starting'
@@ -428,14 +381,9 @@ export async function waitForTargetSessionClaim(transition, {
 }
 
 // Codex can remain hook-silent at an idle resumed TUI until the first prompt
-// starts a turn. Pi is the inverse: its native stream cannot accept the prompt
-// until SessionStart has claimed the target. Keep this ordering explicit and
-// testable because changing it can turn provider switching into a silent wait.
+// starts a turn. Submit the prompt before waiting for the native claim.
 export async function submitTargetValidation(provider, { waitForClaim, inject }) {
-  if (provider === 'pi') {
-    await waitForClaim()
-    return inject()
-  }
+
   await inject()
   return waitForClaim()
 }
@@ -447,7 +395,6 @@ export function codexPermissionDecision(behavior) {
 }
 
 export const CODEX_EFFORTS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
-export const PI_EFFORTS = Object.freeze(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
 
 // Codex's hook payload includes the active model, but currently omits reasoning
 // effort. Resolve that one missing value from the same launch/config inputs the

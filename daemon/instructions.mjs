@@ -71,8 +71,8 @@ export function inspectInstructions(cwd) {
     safeToPropose: !invalid && !sourceTooLarge && !['non_git', 'none', 'aligned'].includes(kind),
     reason,
     fingerprints: {
-      'AGENTS.md': { exists: agents.exists, bytes: agents.bytes, sha256: agents.sha256, symlink: agents.symlink || false },
-      'CLAUDE.md': { exists: claude.exists, bytes: claude.bytes, sha256: claude.sha256, symlink: claude.symlink || false },
+      'AGENTS.md': { exists: agents.exists, bytes: agents.bytes, sha256: agents.sha256, symlink: (agents.symlink) },
+      'CLAUDE.md': { exists: claude.exists, bytes: claude.bytes, sha256: claude.sha256, symlink: (claude.symlink) },
     },
   }
 }

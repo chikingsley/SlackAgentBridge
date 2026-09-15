@@ -42,7 +42,7 @@ const CHANNEL_EVENTS = new Set([
   'session.commentary', 'session.final', 'session.status', 'session.question',
   'session.permission', 'session.usage', 'artifact.ready',
 ])
-const PROVIDERS = new Set(['claude', 'codex', 'pi'])
+const PROVIDERS = new Set(['claude', 'codex'])
 
 export class NodeProtocolError extends Error {
   constructor(code, message) {

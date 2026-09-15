@@ -85,7 +85,7 @@ async function psField(field, pid) {
 // remains as a compatibility wrapper for the existing channel server paths.
 export async function resolveAgentPid(start, provider = 'claude') {
   let pid = Number(start)
-  const match = provider === 'codex' ? /codex/i : provider === 'pi' ? /(?:^|\/)pi(?:$|\s)/i : /claude/i
+  const match = provider === 'codex' ? /codex/i : (/claude/i)
   for (let hop = 0; hop < 6 && pid > 1; hop++) {
     const comm = await psField('comm', pid)
     if (match.test(comm)) return pid

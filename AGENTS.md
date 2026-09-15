@@ -6,8 +6,22 @@ not copy or contradict this contract.
 
 ## Product contract
 
+The direct Codex entry point is `src/direct/` and `npm run direct`.
+It uses native App Server stdio RPC and an explicit task/channel/owner binding.
+It must not enumerate or import history, steal a native writer lock, or use
+tmux. Its approval and output authority comes from the exact bridge-started
+turn. The terminal, hook, and PID/tmux requirements below describe the legacy
+daemon and do not apply to this direct adapter. Keep its TypeScript build and
+`tests/direct/` (Vitest) passing when changing it.
+
+The named-agent hub uses `npm run bridge` with explicit private channels and
+authorized users. Owners create fresh native tasks through Slack mentions and
+may share prompt access with configured collaborators; approvals stay owner-only.
+Persist Slack reply roots and never send output to an unbound destination.
+All tests belong in `tests/`; production `src/` must contain no test files.
+
 Slack Agent Bridge connects trusted Slack operators to interactive coding agent
-sessions on explicitly assigned execution nodes. Claude Code, Codex, and Pi are
+sessions on explicitly assigned execution nodes. Claude Code and Codex are
 separate provider adapters over shared Slack coordination and node-local state,
 tmux, optional Ghostty viewports, and lifecycle infrastructure. The compatible
 default is one all-in-one coordinator plus its implicit local node; remote-node
@@ -82,11 +96,11 @@ generated MCP configuration. Do not print secrets during diagnostics.
   node records must not be opened or detached by a bulk terminal action.
 - A bridge-wide provider update may restart only idle authoritative active
   sessions on nodes assigned to the caller. It must skip active turns,
-  questions, permissions, switches, managed Pi work, automation ownership,
+  questions, permissions, switches, automation ownership,
   delegated team work, and sessions already waking or restarting; update each represented provider
   binary at most once per node per sweep.
 - Slack channels are private and mapped by channel ID, not mutable channel name.
-- A switched channel may own separate Claude, Codex, and Pi native legs, with
+- A switched channel may own separate Claude and Codex native legs, with
   exactly one active. Keep `state.channels[channel]` authoritative; only the active
   session has `session.channel`. Create lineage state lazily, never by bulk
   migration.
@@ -110,20 +124,9 @@ generated MCP configuration. Do not print secrets during diagnostics.
 - Keep Codex requested model/effort separate from the actual model reported by
   lifecycle hooks. Capacity fallback must be visible and must not silently
   rewrite the durable settings used for the next resume.
-- Pi inbound messages, lifecycle, usage, settings, and optional safe-mode tool
-  decisions use the explicitly loaded `pi/sab-extension.ts`. Do not install it
-  globally or parse Pi session files. Pi's native project trust remains a
-  separate decision from SAB safe-mode tool approval.
-- Pi owner prompts use native-session-persistent adaptive routing by default;
-  collaborators remain native. The read-only classifier must receive visible
-  prompt text only—never artifact grants or attachment bytes—and must fail
-  toward managed execution. Explicit `/sab-run` goals remain force-managed;
-  `direct` and `native` remain deliberate bypasses.
-- Managed Pi runs persist only bounded route/goal/plan/counter state in the
-  native session. Child Pi processes must not inherit bridge identity,
-  Slack/upload capabilities, extensions, skills, session state, or project
-  approval. Keep planning, scouting, and independent review read-only; never
-  bypass the parent safe-mode approval gate with a child writer.
+
+
+
 - Generated-file delivery is provider-neutral. The daemon, not the agent,
   chooses the Slack destination from a short-lived grant tied to an accepted
   Slack message and its live session.
@@ -178,9 +181,7 @@ binding, terminal spawning, permission flow, or self-update behavior.
 
 The bridge is remote code execution by design. Flagless Slack spawns currently
 default to Claude `--dangerously-skip-permissions` and Codex
-`--dangerously-bypass-approvals-and-sandbox` (`--yolo`). Pi's built-in tools are
-unrestricted by default; SAB `--safe` adds fail-closed Slack tool approval,
-while Pi `--approve` controls project resource trust only. Preserve explicit
+`--dangerously-bypass-approvals-and-sandbox` (`--yolo`). Preserve explicit
 operator overrides and document any change to these defaults prominently.
 
 Only the bridge administrator or an explicitly assigned node operator may run
@@ -229,15 +230,14 @@ npm run audit
 npm test
 npm run check
 for file in daemon/*.mjs channel/*.mjs scripts/*.mjs; do node --check "$file"; done
-PI_OFFLINE=1 pi --extension ./pi/sab-extension.ts --list-models
 shellcheck -S warning bin/sab scripts/run-session.sh scripts/claude-consent.sh \
   scripts/sab-account.sh hooks/hook.sh hooks/codex-hook.sh \
-  install.sh install-codex.sh install-pi.sh
+  install.sh install-codex.sh
 ```
 
 For a release, also complete `docs/stability-policy.md` and
 `docs/release-checklist.md`. Real Slack, Ghostty,
-Claude, Codex, and Pi smoke tests happen only in a controlled maintenance window or
+Claude and Codex smoke tests happen only in a controlled maintenance window or
 against a completely separate Slack app and tokens.
 
 ## Release rules

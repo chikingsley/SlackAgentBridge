@@ -214,8 +214,6 @@ closed while offline. Overflow is reported rather than silently dropped.
 
 The coordinator downloads Slack attachments with its bot token and transfers
 bounded bytes over the authenticated node connection. The node writes them to
-its private attachment directory and injects only its own local paths. The
-read-only Pi classifier still receives visible prompt text only.
 
 ### Questions and permissions
 
@@ -299,7 +297,7 @@ revalidates active-turn and exact-process fences immediately before mutation.
 4. **Core remote lifecycle:** node-aware creation, channel binding, messages,
    restart recovery, status, and exact stop.
 5. **Parity:** attachments, questions, permissions, artifacts, terminals,
-   updates, automation, usage, managed Pi, and same-node provider switching.
+   updates, automation, usage,  and same-node provider switching.
 6. **Pilot and release:** exercise one colleague node under an RC, simulate
    disconnect/replay/restart/key revocation, run all provider canaries, and only
    then prepare the major release.

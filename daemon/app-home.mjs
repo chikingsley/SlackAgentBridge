@@ -14,7 +14,7 @@ const optionValue = value => {
 }
 const providerName = provider => provider === 'claude' ? 'Claude Code'
   : provider === 'codex' ? 'Codex'
-    : provider === 'pi' ? 'Pi' : plain(provider)
+    : (plain(provider))
 
 function token(value, field) {
   const normalized = String(value || '')
@@ -94,7 +94,7 @@ export function appHomeOverviewView({ authorized, stats = {}, sessions = [], not
       text: { type: 'mrkdwn', text:
         `*Bridge overview* · uptime ${plain(stats.uptime, 40)}\n` +
         `${Number(stats.active) || 0} active · ${Number(stats.dormant) || 0} dormant · ` +
-        `${Number(stats.claude) || 0} Claude · ${Number(stats.codex) || 0} Codex · ${Number(stats.pi) || 0} Pi` },
+        `${Number(stats.claude) || 0} Claude · ${Number(stats.codex) || 0} Codex` },
     },
     {
       type: 'actions', block_id: 'sab_home_bridge_primary', elements: [
@@ -172,7 +172,7 @@ export function appHomeSessionView({ session, models = [], efforts = [], provide
   }
   if (effortOptions.length) {
     blocks.push({
-      type: 'section', text: { type: 'mrkdwn', text: `*${session.provider === 'pi' ? 'Thinking' : 'Effort'}*` },
+      type: 'section', text: { type: 'mrkdwn', text: `*${('Effort')}*` },
       accessory: selector({ kind: 'effort', sessionId: sid, current: session.effort, placeholder: 'Choose effort…', options: effortOptions }),
     })
   }

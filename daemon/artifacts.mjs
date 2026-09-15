@@ -228,7 +228,7 @@ export function artifactDeliveryInstruction(token) {
 
 const ARTIFACT_UPLOAD_COMMAND = /^sab upload --grant ([A-Za-z0-9_-]+) -- FILE_PATH \[FILE_PATH \.\.\.\]\r?$/gm
 
-// Queued Pi prompts keep private capability context separate from visible text;
+// Queued prompts keep private capability context separate from visible text;
 // other providers keep one combined string. Inspect both representations, but
 // accept only the exact command shape emitted by artifactDeliveryInstruction.
 export function artifactGrantTokensFromPrompts(prompts = []) {

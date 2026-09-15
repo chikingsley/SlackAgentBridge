@@ -1,0 +1,7 @@
+{
+  "workspaceDomain": "your-workspace.slack.com",
+  "channelIds": ["C_PRIVATE_TEST_CHANNEL"],
+  "allowedUserIds": ["U_YOUR_SLACK_USER"],
+  "workspaceRoot": "/absolute/path/to/agent-workspaces",
+  "codexPath": "/absolute/path/to/existing/codex"
+}

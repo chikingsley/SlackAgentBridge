@@ -1,7 +1,26 @@
 # Architecture
 
+## Direct Codex mode
+
+The named-agent hub (`npm run bridge`) owns one Socket Mode connection and one
+App Server client per explicitly registered agent. `agents.json` selects the
+workspace, private channels and authorized users. `AgentHub` maps explicit bot
+mentions and persisted Slack reply roots to exact Codex task IDs. An owner may
+share prompt access with another configured user; approvals remain owner-only.
+New agents use read-only sandboxing with on-request approvals. No channel
+history is fetched for prompts. See [agent hub](docs/agent-hub.md).
+
+`src/direct/` is the TypeScript, single-agent entry point. Slack Socket Mode
+talks directly to Codex App Server through stdio JSON-RPC. The binding selects
+one task, channel, and owner. Native turn IDs replace terminal/PID observations
+for message delivery and interruption. No global task enumeration, transcript
+parsing, or history migration occurs. It inherits native task policy and
+refuses an existing writer lock. See [Direct Codex](docs/direct-codex.md).
+
+The remaining architecture describes the legacy terminal-based daemon.
+
 Slack Agent Bridge currently runs as one macOS daemon connecting one trusted
-Slack owner to local Claude Code, Codex, and Pi sessions. Providers have
+Slack owner to local Claude Code and Codex sessions. Providers have
 separate adapters and native conversation identities; Slack, state, tmux,
 terminal viewports, artifacts, and lifecycle coordination are shared.
 
@@ -35,7 +54,6 @@ detached-capable tmux session ─── bin/sab __run <provider>
        │                           scripts/run-session.sh
        ├── Claude + MCP Channel + hooks
        ├── Codex TUI + App Server commentary proxy + hooks
-       └── Pi + explicitly loaded SAB extension
 
 optional Ghostty process ──────── tmux attach-session
 ```
@@ -51,11 +69,11 @@ them.
   subcommand is used only inside tmux.
 - `scripts/run-session.sh` is the provider runner. A local `sab new` creates and
   attaches to tmux; daemon-created sessions start tmux detached. It configures
-  the Claude MCP Channel, Codex event proxy/fallback, or Pi extension before
+  the Claude MCP Channel, Codex event proxy/fallback, before
   executing the provider CLI.
 - `daemon/daemon.mjs` owns Slack ingress/egress, hooks, state adoption,
   session/channel correlation, resurrection, settings, permission decisions,
-  switching, App Home publishing, and managed Pi coordination.
+  switching, App Home publishing, and provider coordination.
 - `daemon/management-ui.mjs` and `daemon/app-home.mjs` build bounded, pure
   Block Kit surfaces. The daemon remains responsible for authorization,
   provider catalogs, command dispatch, and every side effect.
@@ -77,10 +95,7 @@ them.
   a delayed earlier delivery from being overtaken and rejected as stale. Codex
   hooks remain authoritative for native identity and permissions; Stop and the
   exact App Server turn share one durable final-delivery claim.
-- `pi/sab-extension.ts` provides Pi lifecycle, inbound text, model/thinking
-  settings, image support, usage, project trust, safe-mode permissions, and
-  managed-run coordination. It is loaded explicitly and never installed into a
-  project or global Pi configuration.
+
 - `daemon/terminal-control.mjs` resolves authoritative active sessions and
   serializes terminal operations per tmux name. `daemon/terminal-http.mjs` and
   `scripts/sab-terminal.mjs` expose the same operations to local scripts.
@@ -139,7 +154,7 @@ the implicit local node. Explicit remote metadata must agree on both records;
 an invalid, unknown, or mismatched route has no authority and cannot fall back
 to local execution. This preserves old state without a bulk migration.
 
-A switched channel may own one Claude, one Codex, and one Pi native leg through
+A switched channel may own one Claude and one Codex native leg through
 lineage state. Exactly one leg is active. Standby legs preserve resumable IDs
 and settings but have no channel authority or live provider process.
 
@@ -198,7 +213,7 @@ hookless resume; it never searches for or adopts an unrelated Codex process.
 `/sab-update all` derives its candidates from the same exact authoritative
 channel/session mapping. Before each stop it revalidates the PID, tmux, and
 authority and rejects active turns, question forms, permission decisions,
-provider transitions, private maintenance turns, managed Pi activity,
+provider transitions, private maintenance turns,
 automation ownership, delegated team work, and concurrent wake/restart work. Eligible sessions are
 grouped by provider: all selected sessions in a group stop, that provider's CLI
 updates once, and every stopped session resumes even when the update check
@@ -210,13 +225,11 @@ maintenance fences to the new identity. Any one-use artifact grants already
 embedded in queued prompts follow only that exact provider/channel replacement.
 Replacement startup keeps direct input closed while Slack metadata is refreshed.
 One ordered drain is the sole queue consumer: provider launch arguments and
-Claude/Pi stream attachment cannot remove or reorder prompts. It remains active
+Claude stream attachment cannot remove or reorder prompts. It remains active
 until every queued prompt, including prompts arriving during the drain, reaches
 the exact replacement input surface. Drain ownership follows the stable session
-record across native identity replacement, so competing lifecycle and Pi-stream
-callbacks cannot start consumers under the old and new ids. A Pi stream can
-schedule that drain only after the exact SessionStart has completed its Slack
-metadata work. A failed delivery restores the undelivered tail; a failed wake
+record across native identity replacement, so competing lifecycle
+callbacks cannot start consumers under the old and new ids. A failed delivery restores the undelivered tail; a failed wake
 or metadata setup releases only the exact opaque fence generation acquired by
 that startup. Native identity replacement carries that ownership forward, and
 a delayed failure cannot clear a newer restart's fence. This releases only the
@@ -236,7 +249,6 @@ The canonical manifest exposes one namespace:
 ```text
 /sab-new  /sab-model  /sab-effort  /sab-flags  /sab-update
 /sab-stop /sab-switch /sab-kill    /sab-status /sab-usage
-/sab-run  /sab-account /sab-terminal
 /sab-team /sab-health /sab-cleanup /sab-claim /sab-help
 ```
 
@@ -245,7 +257,6 @@ one until the owner clicks a provider. In a session channel, the authoritative
 session selects provider-specific behavior for every other provider operation.
 From the control channel, `/sab-status` and `/sab-usage` may take a provider
 filter. `/sab-update all` is bridge-wide and may be run from the control channel
-or a session channel. `/sab-run` rejects non-Pi sessions and `/sab-account`
 rejects non-Claude sessions before mutation.
 
 No-argument management commands use Block Kit as a presentation layer over the
@@ -258,10 +269,7 @@ The rendered identity remains immutable across asynchronous lookups even when a
 native `/clear` rebrands the in-memory session object. Team actions also carry
 the exact team ID so controls from a closed team cannot mutate its replacement.
 Stale controls fail visibly. Broad update and team-close actions require Slack
-confirmation. Mutable Pi controls are fenced again inside the native extension,
-before model or effort mutation. The extension advertises that capability on
-its authenticated local stream; a daemon-only rollout refuses mutable controls
-for a preserved legacy Pi process until that exact session is updated. An exact
+confirmation. An exact
 session reserved for provider maintenance rejects overlapping
 lifecycle/settings changes until it resumes. Claude picker entries carry exact
 provider model IDs so standard and 1M-context siblings cannot collapse through
@@ -405,12 +413,6 @@ Coordinator follow-ups are journaled and mirrored to both channels before a
 dormant provider defers their exact-once injection; successful injection creates
 fresh in-memory turn proof for restart reconciliation.
 
-Pi restart adoption never treats its persisted turn-start timestamp as current
-liveness. SAB restores Pi polling and delegated-task proof only after a new
-native extension status/start event from the exact re-adopted process. If that
-proof does not arrive within the recovery grace period, the historical task and
-all of its stale poller/input fences are released without replay.
-
 The process claim also requires the provider to be the root provider process
 under the SAB tmux pane. Nested utilities such as `codex review` inherit the
 parent environment but are rejected before SessionStart registration and before
@@ -424,7 +426,7 @@ Task delivery is journal-first:
 2. Atomically persist a unique queued task, then publish its complete bounded
    payload and idempotent status cards in both Slack channels.
 3. Wait while the target is dormant, busy, switching, asking a question,
-   awaiting permission, under maintenance, or owned by managed Pi work.
+   awaiting permission, under maintenance.
 4. Serialize both visible instruction-card updates for each replacement and
    bind the final claim to that exact fully audited instruction revision. Then
    reserve the worker input surface, atomically change `queued → dispatching`,
@@ -436,9 +438,8 @@ Task delivery is journal-first:
    marker, or when the exact process-bound worker successfully journals a reply
    for that task. The latter is durable acceptance proof when a provider omits
    its prompt hook; it is not final-result proof. Claude's completed transcript
-   path, Codex's Stop hook or matching successful App Server turn, or Pi's
-   extension final event may report only the same task/session binding. A
-   provider final changes a new task to `awaiting_release`, posts its report,
+   path or Codex's Stop hook or matching successful App Server turn supplies a
+   provider final. That final changes a new task to `awaiting_release`, posts its report,
    and leaves `session.teamActiveTaskId` intact. Coordinator follow-ups are
    serialized in durable acceptance order; a coordinator release is persisted
    without being reclassified as an authenticated worker continuation event.
@@ -468,19 +469,7 @@ uses `sab team reply` to put selected progress in the source mailbox. Questions
 and permissions stay on the worker's normal Slack surface. A coordinator uses
 `sab team message` to answer or amend an exact active task, with a visible copy
 in both channels; SAB refuses delivery while a question or permission surface
-is open, and an uncertain provider attempt is never replayed. A disconnected
-Pi stream is a known pre-write rejection: the journal remains pending and the
-normal reconciler may deliver it once after the exact stream reconnects. Every
-mutation response contains its journaled request receipt; after a client
-timeout, `sab team mutation` queries that identity without replaying the
-operation. Filtered,
-cursor-paginated inbox reads expose only the caller's task envelopes and retain
-the original instruction for that bounded journal lifetime. Interrupt, kill,
-session death, team removal/closure, and expiry produce visible task failure or
-cancellation. Bulk updates skip active worker tasks and cleanup preserves
-dormant team channels.
-
-Team file relay is separate from artifact grants. It applies the artifact
+is open, and an uncertain provider attempt is never replayed. Team file relay is separate from artifact grants. It applies the artifact
 realpath/regular-file/count/aggregate-size validator to the exact source
 workspace, hashes content for retry conflict detection, writes mode-0600 copies
 under `~/.config/ccs/team-files`, uploads the copies to the linked Slack channel,
@@ -562,29 +551,9 @@ but it cannot overwrite the requested model used on the next resume; a mismatch
 is reported visibly in the session channel. A footer becomes the new durable
 resume intent only when the idle, authoritative TUI also renders Codex's
 explicit `Model changed to …` confirmation; a plain footer mismatch is never
-treated as operator intent because it may be a capacity fallback. Claude and Pi similarly rebuild resume arguments
+treated as operator intent because it may be a capacity fallback. Claude similarly rebuild resume arguments
 from their latest known native model and effort, stripping stale original
 model/effort flags first.
-
-### Pi
-
-The SAB extension owns Pi's bridge-facing lifecycle and streams. Built-in tools
-are unrestricted by default; SAB `--safe` adds a fail-closed Slack decision per
-tool call. Pi `--approve` is separate project-resource trust.
-
-On each daemon-stream connection the extension reports whether Pi's native
-input surface is idle. That exact-session observation restores polling for a
-live re-adopted turn, or releases stale busy/task state without replay when Pi
-has already returned to its prompt. Persisted timestamps alone never prove a
-turn is still running.
-
-Ordinary owner prompts use persisted adaptive routing. A no-tools classifier
-receives only visible prompt text and fails toward managed execution.
-Collaborator prompts remain native. `/sab-run` can force a bounded
-planner/worker/independent-reviewer state machine with wall-clock, parent-turn,
-subagent, and review budgets. Read-only children do not inherit bridge identity,
-Slack/upload capability, session state, extensions, skills, project approval,
-or writable tools.
 
 ## Working status and output
 
@@ -602,8 +571,7 @@ pressure is visible through `/sab-health`.
 
 Final text comes only from provider-stable sources. Claude reads completed
 transcript records, Codex uses either the Stop hook's final field or the exact
-App Server `final_answer` after a successful matching `turn/completed`, and Pi
-uses its extension event. The two Codex sources atomically claim the same native
+App Server `final_answer` after a successful matching `turn/completed`. The two Codex sources atomically claim the same native
 turn before Slack delivery. Codex turns that omit `UserPromptSubmit` are tracked from the
 successful bridge injection, and a rendered `Working (...)` footer allows
 restart re-adoption when the timestamp was lost. Two unchanged idle-surface

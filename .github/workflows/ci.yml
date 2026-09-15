@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [20, 24]
+        node: [22, 24]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -29,7 +29,9 @@ jobs:
             node --check "$file"
           done
       - name: Test
-        run: npm test
+        run: npm run test:all
+      - name: Type-check TypeScript
+        run: npm run typecheck
       - name: Check docs and release contracts
         run: npm run check
 
@@ -44,4 +46,4 @@ jobs:
           shellcheck -S warning \
             bin/sab scripts/run-session.sh scripts/claude-consent.sh \
             scripts/sab-account.sh hooks/hook.sh hooks/codex-hook.sh \
-            install.sh install-codex.sh install-pi.sh
+            install.sh install-codex.sh

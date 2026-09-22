@@ -1,5 +1,23 @@
 # Verification — 2026-09-15
 
+## Shared desktop connection — 2026-09-21
+
+GMK, Node 24.21.0 and Codex 0.154.0: build and strict typecheck pass; all 31
+Vitest tests pass; production dependency audit reports zero vulnerabilities.
+The live existing project task was read and subscribed through the running
+Codex server's Unix socket. It remained active in the desktop session.
+
+New regression coverage includes explicit public-channel consent and membership,
+exact bot identity/channel/agent routing, persisted bot turn limits, revoked bot
+access, shared-server socket lifecycle, desktop approval isolation, queued Slack
+work, bot authority separation, and ownership during concurrent turn starts.
+
+The earlier Windows/Hochi evidence below describes the September 15 deployment.
+Current live deployment verification is recorded in the local project status
+artifact; no private configuration or message transcripts are committed.
+
+## Original independent connectors
+
 The same native gateway/connector implementation was tested on Windows and
 Hochi (macOS), using each computer's installed Codex and separate explicitly
 created test tasks. Only the dedicated private Slack test channel was used.

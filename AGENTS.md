@@ -8,9 +8,14 @@ Historical behavior is available in Git history; do not restore it implicitly.
 - Every connector owns its Codex login, process and explicitly selected tasks.
 - No history discovery/import, transcript parsing or active-writer takeover.
 - No execution fallback: offline/unknown/mismatched targets fail closed.
-- Authorize exact owner, private channel, device, native task, turn and reply root.
+- Authorize exact owner, configured channel, device, native task, turn and reply root.
+  Public channels require explicit `publicChannelIds` opt-in and bot membership.
 - Only owners approve/deny/answer interactions or stop turns. Collaborator prompts
-  are labelled. Agents cannot send arbitrary Slack destinations or trigger bots.
+  are labelled. Bot collaborators require an exact user/bot/channel/agent allowlist,
+  an explicit mention on each input, and a persisted per-thread turn budget.
+  Agent output stays in its authorized reply root with mentions escaped.
+- Attach active desktop tasks through their existing local App Server socket.
+  Shared connections preserve desktop turns, output and approval ownership.
 - Persist claims before side effects; never replay uncertain work.
 - Keep credentials, generated state, logs and transcripts outside the repository.
 - Tests live only in tests/, use Vitest and TypeScript. Source lives in src/.

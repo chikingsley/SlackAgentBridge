@@ -7,7 +7,7 @@ Slack -> gateway -> authenticated HTTPS polling -> owner computer -> native
 Codex App Server over stdio. Completed agent messages return to the gateway,
 which validates the bound task, device and Slack reply destination.
 
-`src/gateway/` owns private channel/member policy, pairing, registry, durable
+`src/gateway/` owns explicit channel/member policy, pairing, registry, durable
 reply roots, event deduplication, output destination checks and the loopback API.
 `src/connector/` owns exact task selection, existing local Codex login, local
 process lock, native session resume and polling. `src/direct/` contains the
@@ -30,10 +30,20 @@ output do not reach Slack. Output is durably claimed before the Slack API call.
 
 This transport favors avoiding duplicate execution over automatic retries.
 Operators must inspect uncertain work and send a new message. Bot events are
-ignored; there is no autonomous agent-to-agent recursion. Local credentials
+ignored by default. Exact configured bot collaborators require explicit mentions
+and a durable per-thread turn budget. Local credentials
 and task history remain on each connector. Prompt and output text passes through
 the gateway and Slack; the gateway's state records routing IDs, not transcripts.
 
 HTTPS must terminate before the loopback API. The deployed test route uses
 Tailscale Serve; other HTTPS reverse proxies work. Only polling reconnects
 automatically. OS service installation is outside the runtime.
+
+An optional `appServerSocket` selects WebSocket RPC over the existing local Unix
+control socket instead of starting another Codex process. The connector subscribes
+only to its selected tasks. Shared desktop turns and approval requests remain
+owned by their initiating client. A bridge turn becomes owned only after the
+matching `turn/start` response; early events are buffered until that identity is
+known. Shared-mode prompts queue in memory while the task is active and start
+after completion. Disconnect drops pending in-memory work and preserves durable
+delivery claims, maintaining the existing explicit-resubmission policy.

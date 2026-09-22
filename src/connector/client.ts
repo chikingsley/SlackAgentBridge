@@ -1,9 +1,11 @@
 import { z } from 'zod';
-import { safeEndpoint, registration, slackId } from '../gateway/protocol.js';
+import { safeEndpoint, registration, slackId, botIdentity } from '../gateway/protocol.js';
 
 export const connectorConfig = z.object({
   url: z.string(), token: z.string().min(40), deviceId: z.string(), ownerId: slackId, channelId: slackId,
   codexPath: z.string().optional(),
+  appServerSocket: z.string().optional(),
+  trustedBots: z.array(botIdentity).optional(),
   agents: z.array(registration.extend({ cwd: z.string() })),
 }).strict();
 export type ConnectorConfig = z.infer<typeof connectorConfig>;

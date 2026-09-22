@@ -6,6 +6,8 @@ export type Binding = {
   codexPath?: string;
   workspaceDomain?: string;
   collaboratorIds?: string[];
+  trustedBots?: { userId: string; botId: string }[];
+  sharedServer?: boolean;
 };
 
 export function readBinding(file: string): Binding {

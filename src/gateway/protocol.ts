@@ -3,6 +3,10 @@ import { z } from 'zod';
 export const slackId = z.string().regex(/^[CUWG][A-Z0-9]+$/);
 export const alias = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/);
 export const timestamp = z.string().regex(/^\d+\.\d+$/);
+export const botIdentity = z.object({ userId: slackId, botId: z.string().regex(/^B[A-Z0-9]+$/) }).strict();
+export const botCollaborator = botIdentity.extend({
+  channelId: slackId, agentName: alias, maxTurnsPerThread: z.number().int().min(1).max(10).optional(),
+}).strict();
 export const registration = z.object({ name: alias, threadId: z.string().regex(/^[a-zA-Z0-9_-]{8,128}$/) }).strict();
 export const inputSchema = z.object({
   id: z.string().min(1).max(200), channel: slackId, user: slackId,
@@ -22,9 +26,23 @@ export const outputSchema = z.object({
 export const gatewayConfig = z.object({
   workspaceDomain: z.string().regex(/^[a-z0-9-]+\.slack\.com$/),
   channelIds: z.array(slackId).min(1), allowedUserIds: z.array(slackId).min(1),
+  publicChannelIds: z.array(slackId).optional(),
+  botCollaborators: z.array(botCollaborator).optional(),
   publicUrl: z.string().url(), port: z.number().int().min(1024).max(65535).default(8877),
-}).strict();
+}).strict().superRefine((config, context) => {
+  if (config.publicChannelIds?.some(id => !config.channelIds.includes(id))
+    || config.botCollaborators?.some(bot => !config.channelIds.includes(bot.channelId)))
+    context.addIssue({ code: 'custom', message: 'Public channels and bot collaborators must use configured channels' });
+  if (config.botCollaborators?.some(bot => config.allowedUserIds.includes(bot.userId)))
+    context.addIssue({ code: 'custom', message: 'Keep bot identities separate from human owners' });
+});
 export type GatewayConfig = z.infer<typeof gatewayConfig>;
+
+export function verifyChannel(config: GatewayConfig, id: string, channel?: { is_private?: boolean; is_member?: boolean }): void {
+  if (!config.channelIds.includes(id) || !channel?.is_member
+    || (!channel.is_private && !config.publicChannelIds?.includes(id)))
+    throw new Error(`Invite the bot to the explicitly authorized channel ${id}; public channels require publicChannelIds`);
+}
 
 export function safeEndpoint(value: string): string {
   const url = new URL(value);

@@ -1,6 +1,6 @@
 {
   "name": "slack-agent-bridge",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Connect selected local Codex agents to one shared Slack gateway.",
   "private": true,
   "type": "module",
@@ -46,10 +46,12 @@
   "dependencies": {
     "@slack/socket-mode": "^3.0.0",
     "@slack/web-api": "^8.0.0",
+    "ws": "^8.21.3",
     "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^26.5.1",
+    "@types/ws": "^8.18.1",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"
   }

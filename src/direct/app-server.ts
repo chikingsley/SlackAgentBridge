@@ -1,6 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { EventEmitter } from 'node:events';
+import net from 'node:net';
+import path from 'node:path';
+import WebSocket from 'ws';
 
 export type RpcId = string | number;
 export type RpcMessage = {
@@ -11,6 +14,7 @@ export type RpcMessage = {
 /** Codex's documented JSON-RPC-over-stdio transport, with no PTY or shell. */
 export class AppServer extends EventEmitter {
   private child?: ChildProcessWithoutNullStreams;
+  private socket?: WebSocket;
   private sequence = 0;
   private pending = new Map<RpcId, {
     resolve: (value: any) => void; reject: (error: Error) => void;
@@ -20,10 +24,30 @@ export class AppServer extends EventEmitter {
 
   constructor(private readonly executable = 'codex',
     private readonly args = ['app-server', '--listen', 'stdio://'],
-    private readonly timeoutMs = 30_000) { super(); }
+    private readonly timeoutMs = 30_000,
+    private readonly socketPath?: string) { super(); }
 
   async start(): Promise<void> {
-    if (this.child) throw new Error('App Server client is already started');
+    if (this.child || this.socket) throw new Error('App Server client is already started');
+    if (this.socketPath) {
+      if (!path.isAbsolute(this.socketPath)) throw new Error('Choose an absolute local App Server socket path');
+      const socket = this.socket = new WebSocket('ws://localhost/rpc', {
+        createConnection: () => net.createConnection(this.socketPath!),
+        perMessageDeflate: false, handshakeTimeout: this.timeoutMs,
+      });
+      socket.on('message', raw => {
+        try { this.receive(JSON.parse(raw.toString())); }
+        catch { this.fail(new Error('Invalid App Server JSON response')); socket.terminate(); }
+      });
+      socket.on('error', error => this.fail(error));
+      socket.on('close', () => this.fail(new Error('Codex App Server disconnected')));
+      await new Promise<void>((resolve, reject) => {
+        socket.once('open', () => { socket.off('error', reject); resolve(); });
+        socket.once('error', reject);
+      });
+      await this.initialize();
+      return;
+    }
     const env = { ...process.env };
     // This process is a client, not a child agent of the task launching it.
     for (const key of ['CODEX_THREAD_ID', 'CODEX_INTERNAL_ORIGINATOR_OVERRIDE',
@@ -40,8 +64,12 @@ export class AppServer extends EventEmitter {
       try { this.receive(JSON.parse(line)); }
       catch { this.fail(new Error('Invalid App Server JSON response')); this.child?.kill(); }
     });
+    await this.initialize();
+  }
+
+  private async initialize(): Promise<void> {
     await this.request('initialize', {
-      clientInfo: { name: 'slack_agent_bridge', title: 'Slack Agent Bridge', version: '2.1.0' },
+      clientInfo: { name: 'slack_agent_bridge', title: 'Slack Agent Bridge', version: '3.1.0' },
     });
     this.send({ method: 'initialized', params: {} });
   }
@@ -60,6 +88,10 @@ export class AppServer extends EventEmitter {
   }
 
   private send(message: RpcMessage): void {
+    if (this.socket) {
+      if (this.stopped || this.socket.readyState !== WebSocket.OPEN) throw new Error('Codex App Server is not connected');
+      this.socket.send(JSON.stringify(message)); return;
+    }
     if (!this.child || this.stopped || !this.child.stdin.writable)
       throw new Error('Codex App Server is not connected');
     this.child.stdin.write(JSON.stringify(message) + '\n');
@@ -97,6 +129,16 @@ export class AppServer extends EventEmitter {
 
   async close(): Promise<void> {
     this.fail(new Error('App Server client closed'));
+    if (this.socket) {
+      const socket = this.socket;
+      if (socket.readyState === WebSocket.CLOSED) return;
+      await new Promise<void>(resolve => {
+        const timer = setTimeout(() => { socket.terminate(); resolve(); }, 1500);
+        socket.once('close', () => { clearTimeout(timer); resolve(); });
+        socket.close();
+      });
+      return;
+    }
     const child = this.child;
     if (!child || child.exitCode !== null || child.signalCode !== null) return;
     await new Promise<void>(resolve => {

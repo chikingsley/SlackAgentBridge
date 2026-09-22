@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { SocketModeClient } from '@slack/socket-mode';
 import { WebClient } from '@slack/web-api';
-import { gatewayConfig, inputSchema, safeEndpoint } from './protocol.js';
+import { gatewayConfig, inputSchema, safeEndpoint, verifyChannel } from './protocol.js';
 import { Router } from './router.js';
 import { createApi } from './http.js';
 import { verifyWorkspace } from '../direct/binding.js';
@@ -40,7 +40,7 @@ async function main() {
     if (!auth.user_id) throw new Error('No bot identity');
     for (const id of config.channelIds) {
       const { channel } = await slack.conversations.info({ channel: id });
-      if (!channel?.is_private || !channel.is_member) throw new Error(`Bot must be invited to private channel ${id}`);
+      verifyChannel(config, id, channel);
     }
     const router = new Router(config, auth.user_id, file + '.state.json', async (channel, text, root) => {
       const escaped = text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');

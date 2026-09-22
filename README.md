@@ -23,8 +23,11 @@ Tailscale network; Slack desktop is optional (Slack web works).
    ```
 
    This creates one named native Codex task. To select an existing task, add
-   `--thread TASK_ID`. Close its other active writer first; the connector never
-   takes over an active desktop task. Use `--codex /path/to/codex` if it is not on PATH.
+   `--thread TASK_ID`. For an active desktop task, set
+   `--app-server-socket /absolute/path/to/app-server-control.sock` to share its
+   existing Codex server. The connector verifies only the selected task and
+   preserves the desktop writer. Standalone process mode requires an idle task.
+   Use `--codex /path/to/codex` if it is not on PATH.
 5. Start `npm run start:connector`. It runs in the background; you can close the terminal.
 6. In Slack: `@Codex Agent joey your question`. Continue by replying in that
    Slack thread. To register another agent, run `npm run stop:connector`, repeat step 4,
@@ -52,15 +55,27 @@ for any local command. The default is `~/.config/ccs/connector.json`.
 - Reply `approve CODE`, `deny CODE`, or `answer CODE text` when the agent requests
   an owner decision. Decisions must be in the exact originating Slack thread.
 
-Bot messages are ignored, so agents cannot recursively trigger each other.
-Sharing lets a person ask another person's agent; autonomous agent-to-agent
-negotiation is not enabled. Agents do not represent their owner's unstated views.
+Bot messages are ignored by default. An administrator can configure exact
+`botCollaborators` with `userId`, `botId`, `channelId`, `agentName` and
+`maxTurnsPerThread` (default 3). Each request requires a fresh Codex Agent mention.
+The connector separately allows those identities in `trustedBots`.
+Bots have collaborator prompt access; human owners retain approvals and management.
+The per-thread bot budget persists across gateway restarts. Outgoing mentions
+are escaped. Agents do not represent their owner's unstated views.
 Text is supported; file messages receive an explicit unsupported response.
+
+With `appServerSocket` configured, the connector attaches on startup and queues
+up to ten prompts during active desktop or bridge work. Only turns started by
+the bridge send output to Slack. Closing the connector closes its socket client
+and preserves the shared Codex server. Queued requests stay in memory; after a
+connector restart, inspect the task and explicitly resend any unfinished request.
 
 ## Gateway administrator
 
 Run exactly one gateway per Slack app. Use `slack/app-manifest.json` to configure
-the app, install it, and invite its bot to the chosen **private** channels.
+the app, install it, and invite its bot to the chosen channels. Channels are
+private by default; public channels require their IDs in both `channelIds` and
+`publicChannelIds`.
 Copy `gateway.example.json` to `~/.config/ccs/gateway.json`, selecting the exact
 workspace, channel IDs, member IDs and HTTPS URL. Add credentials to the adjacent
 private `env` file:

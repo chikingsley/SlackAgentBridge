@@ -28,26 +28,35 @@ async function main() {
     control?.close();
   };
   process.once('SIGINT', () => void close()); process.once('SIGTERM', () => void close());
-  async function dispatch(job: Job) {
-    const local = config.agents.find(a => a.name === job.name && a.threadId === job.threadId);
-    if (!local || job.ownerId !== config.ownerId || job.channelId !== config.channelId) throw new Error('Gateway job does not match a locally selected agent');
+  async function connectAgent(local: typeof config.agents[number]) {
     let connection = connections.get(local.name);
     if (!connection) {
-      const rpc = new AppServer(config.codexPath);
-      const binding: Binding = { threadId: local.threadId, channelId: config.channelId, ownerId: config.ownerId, collaboratorIds: job.collaboratorIds };
+      const rpc = new AppServer(config.codexPath, undefined, undefined, config.appServerSocket);
+      const binding: Binding = { threadId: local.threadId, channelId: config.channelId, ownerId: config.ownerId,
+        collaboratorIds: [], trustedBots: config.trustedBots, sharedServer: Boolean(config.appServerSocket) };
       await rpc.start();
       const relay = new DirectRelay(rpc, binding, new Journal(`${file}.${local.name}.delivery.json`), async (text, root) => {
         if (!root) throw new Error('Missing Slack reply root');
         await call(config.url, config.token, '/output', { id: randomUUID(), name: local.name, threadId: local.threadId, root, text });
       }, () => console.error(`Output delivery failed for ${local.name}; not replayed`));
       try { await relay.connect(); } catch (error) { await rpc.close(); throw error; }
+      rpc.on('disconnect', () => {
+        if (!stopped) { process.exitCode = 1; void close(); }
+      });
       connection = { rpc, binding, relay }; connections.set(local.name, connection);
     }
+    return connection;
+  }
+  async function dispatch(job: Job) {
+    const local = config.agents.find(a => a.name === job.name && a.threadId === job.threadId);
+    if (!local || job.ownerId !== config.ownerId || job.channelId !== config.channelId) throw new Error('Gateway job does not match a locally selected agent');
+    const connection = await connectAgent(local);
     connection.binding.collaboratorIds = job.collaboratorIds;
     await connection.relay.receive({ ...job.event, threadTs: job.event.threadTs || job.event.ts });
   }
   try {
     for (const a of config.agents) await call(config.url, config.token, '/register', { name: a.name, threadId: a.threadId });
+    if (config.appServerSocket) for (const a of config.agents) await connectAgent(a);
     console.log(`Connector ready for ${config.agents.map(a => a.name).join(', ') || 'no agents (stop and add one first)'}`);
     control = await startControl(close);
     save(file + '.status.json', { ready: true, pid: process.pid, names: config.agents.map(a => a.name), control });

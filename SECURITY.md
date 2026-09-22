@@ -1,7 +1,10 @@
 # Security
 
-Only configured Slack member IDs in configured private channels may use the
-bridge. Connector invitations are private ephemeral Slack messages, single use,
+Only configured Slack member IDs in configured channels may use the bridge.
+Public channels require explicit opt-in and confirmed bot membership. Exact
+bot collaborators have prompt-only access to one named agent in one channel,
+require explicit mentions, and have persisted per-thread turn limits.
+Connector invitations are private ephemeral Slack messages, single use,
 identity/channel scoped and expire after ten minutes. Device credentials are
 random bearer tokens; only hashes are stored at the gateway. Local token/state
 files use private POSIX permissions; on Windows restrict the configuration
@@ -25,6 +28,12 @@ work even when a response is lost. Inspect the task before resubmitting.
 Text passes through Slack and the gateway, so do not send data unsuitable for
 that channel's members. Permission replies are owner-only in the exact Slack
 thread. Untrusted collaborator prompts cannot authorize approvals or stops.
+
+Shared App Server attachment uses an absolute local Unix socket path and keeps
+the desktop writer intact. The connector ignores other clients' approval
+requests and forwards output only from its own returned turn IDs. Existing
+desktop output and task history stay local. Stopping the connector disconnects
+only its socket and preserves the server process.
 
 Report suspected defects privately to the repository owner before publishing
 credentials or reproduction transcripts. The bridge is not a hardened public

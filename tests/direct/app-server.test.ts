@@ -4,6 +4,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { EventEmitter } from 'node:events'
+import http from 'node:http'
+import { WebSocketServer } from 'ws'
 import { AppServer, type RpcId, type RpcMessage } from '../../src/direct/app-server.js'
 import { DirectRelay } from '../../src/direct/relay.js'
 import { Journal, verifyWorkspace } from '../../src/direct/binding.js'
@@ -198,3 +200,64 @@ createInterface({input:process.stdin}).on('line', l=>{
   await assert.rejects(rpc.request('never'), /not retried/)
   await assert.rejects(rpc.request('exit'), /disconnected/)
 })
+
+test('shared Unix socket attaches to an existing server and closing the client preserves it', async t => {
+  if (process.platform === 'win32') return;
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sab-shared-'));
+  const socket=path.join(dir,'server.sock'), server=http.createServer(), wss=new WebSocketServer({server});
+  wss.on('connection',ws=>ws.on('message',raw=>{const m=JSON.parse(raw.toString());if(m.id!==undefined)ws.send(JSON.stringify({id:m.id,result:m.method==='initialize'?{}:{thread:{id:'selected-task',status:{type:'active'}}}}))}));
+  await new Promise<void>(resolve=>server.listen(socket,resolve));
+  const rpc=new AppServer('unused',undefined,3000,socket);
+  t.onTestFinished(async()=>{await rpc.close();for(const client of wss.clients)client.terminate();await new Promise<void>(resolve=>wss.close(()=>resolve()));await new Promise<void>(resolve=>server.close(()=>resolve()));fs.rmSync(dir,{recursive:true,force:true})});
+  await rpc.start();
+  assert.equal((await rpc.request('thread/read',{threadId:'selected-task',includeTurns:false})).thread.status.type,'active');
+  await rpc.close(); assert.equal(server.listening,true);
+});
+
+test('shared desktop work stays private and queued Slack work starts after its completion', async t => {
+  const {dir,event}=fixture(t), rpc=new FakeRpc(), posts:string[]=[];
+  const request=rpc.request.bind(rpc);
+  rpc.request=async(method,params={})=>method==='thread/resume'?{thread:{id:params.threadId,status:{type:'active'}}}:request(method,params);
+  const relay=new DirectRelay(rpc,{...binding,sharedServer:true},new Journal(path.join(dir,'shared.json')),async text=>{posts.push(text)});
+  await relay.connect();
+  rpc.emit('request',{id:8,method:'item/commandExecution/requestApproval',params:{threadId:binding.threadId,turnId:'desktop'}});
+  rpc.emit('notification',{method:'item/completed',params:{threadId:binding.threadId,turnId:'desktop',item:{id:'private',type:'agentMessage',text:'desktop-only content'}}});
+  await relay.receive(event);await relay.flush();
+  assert.equal(rpc.calls.filter(c=>c.method==='turn/start').length,0);
+  assert.equal(rpc.rejected.length,0);assert.deepEqual(posts,['Queued for this project task after its current work finishes.']);
+  rpc.emit('notification',{method:'turn/completed',params:{threadId:binding.threadId,turn:{id:'desktop',status:'completed'}}});
+  await relay.flush();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(rpc.calls.filter(c=>c.method==='turn/start').length,1);
+});
+
+test('trusted bot prompts are labelled and bot identity cannot approve or stop', async t => {
+  const {dir,event}=fixture(t), rpc=new FakeRpc(), posts:string[]=[];
+  const relay=new DirectRelay(rpc,{...binding,collaboratorIds:['UFABLE'],trustedBots:[{userId:'UFABLE',botId:'BFABLE'}]},new Journal(path.join(dir,'bot.json')),async text=>{posts.push(text)});
+  await relay.connect();
+  const botEvent={...event,user:'UFABLE',botId:'BFABLE',subtype:'bot_message'};
+  await relay.receive({...botEvent,id:'wrong-bot',botId:'BOTHER'});
+  assert.equal(rpc.calls.filter(c=>c.method==='turn/start').length,0);
+  await relay.receive(botEvent);
+  assert.match(JSON.stringify(rpc.calls.at(-1)),/Slack agent UFABLE \(bot BFABLE\)/);
+  await relay.receive({...botEvent,id:'stop',text:'sab stop'});
+  await relay.receive({...botEvent,id:'approve',text:'approve key'});
+  assert.equal(rpc.calls.filter(c=>c.method==='turn/interrupt').length,0);
+  assert.equal(rpc.responses.length,0);
+});
+
+test('a foreign turn racing our start never becomes bridge-owned', async t => {
+  const {rpc,relay,event,posts}=fixture(t);
+  await relay.connect();
+  rpc.request=async(method,params={})=>{
+    if(method==='turn/start'){
+      rpc.emit('notification',{method:'turn/started',params:{threadId:binding.threadId,turn:{id:'foreign'}}});
+      rpc.emit('notification',{method:'item/completed',params:{threadId:binding.threadId,turnId:'foreign',item:{id:'secret',type:'agentMessage',text:'foreign private text'}}});
+      await relay.flush();return {turn:{id:'ours'}};
+    }
+    return {};
+  };
+  await relay.receive(event);await relay.flush();
+  assert.deepEqual(posts,[]);
+  rpc.emit('notification',{method:'item/completed',params:{threadId:binding.threadId,turnId:'ours',item:{id:'answer',type:'agentMessage',text:'our response'}}});
+  await relay.flush();assert.deepEqual(posts,['our response']);
+});

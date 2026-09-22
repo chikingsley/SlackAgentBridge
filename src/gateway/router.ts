@@ -12,6 +12,7 @@ const stateSchema = z.object({
   devices: z.array(deviceSchema), agents: z.array(agentSchema),
   invites: z.array(z.object({ hash: z.string(), ownerId: z.string(), channelId: z.string(), expires: z.number() })),
   roots: z.record(z.string(), z.string()),
+  botTurns: z.record(z.string(), z.number().int().nonnegative()).optional(),
 });
 type Device = z.infer<typeof deviceSchema>;
 type Agent = z.infer<typeof agentSchema>;
@@ -34,6 +35,19 @@ export class Router {
     fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
     fs.writeFileSync(this.file + '.tmp', JSON.stringify(this.state, null, 2), { mode: 0o600 });
     fs.renameSync(this.file + '.tmp', this.file);
+  }
+  private botAccess(e: Input, agent?: Agent) {
+    return this.config.botCollaborators?.find(bot => bot.userId === e.user && bot.botId === e.botId
+      && bot.channelId === e.channel && (!agent || bot.agentName === agent.name));
+  }
+  private canPrompt(agent: Agent, event: Input): boolean {
+    if (event.botId) return Boolean(this.botAccess(event, agent));
+    return this.config.allowedUserIds.includes(event.user)
+      && (agent.ownerId === event.user || agent.collaboratorIds.includes(event.user));
+  }
+  private collaborators(agent: Agent): string[] {
+    return [...new Set([...agent.collaboratorIds, ...(this.config.botCollaborators || [])
+      .filter(bot => bot.channelId === agent.channelId && bot.agentName === agent.name).map(bot => bot.userId)])];
   }
   invite(ownerId: string, channelId: string): string {
     if (!this.config.allowedUserIds.includes(ownerId) || !this.config.channelIds.includes(channelId)) throw new Error('Not authorized');
@@ -85,8 +99,8 @@ export class Router {
     let job: Job | undefined;
     while ((job = queue?.shift())) {
       const a = this.state.agents.find(a => a.deviceId === d.id && a.name === job!.name && a.threadId === job!.threadId);
-      if (a && (a.ownerId === job.event.user || a.collaboratorIds.includes(job.event.user)))
-        return { ...job, collaboratorIds: [...a.collaboratorIds] };
+      if (a && this.canPrompt(a, job.event))
+        return { ...job, collaboratorIds: this.collaborators(a) };
     }
     return null;
   }
@@ -107,15 +121,27 @@ export class Router {
     this.chain = next.catch(() => {}); return next;
   }
   private async dispatch(e: Input) {
-    if (!this.config.allowedUserIds.includes(e.user) || !this.config.channelIds.includes(e.channel)
-      || e.botId || (e.subtype && e.subtype !== 'file_share')) return;
+    if (!this.config.channelIds.includes(e.channel) || e.user === this.botId) return;
+    const bot = e.botId ? this.botAccess(e) : undefined;
+    if (e.botId ? !bot : !this.config.allowedUserIds.includes(e.user)) return;
+    if (e.subtype && e.subtype !== 'file_share' && !(bot && e.subtype === 'bot_message')) return;
     const mention = `<@${this.botId}>`, root = e.threadTs || e.ts;
+    // Bots require a fresh explicit mention for every request, including bound threads.
+    if (bot && !e.text.includes(mention)) return;
     const bound = this.state.roots[`${e.channel}:${root}`];
     if (!e.text.includes(mention) && !bound) return;
     if (!this.journal.claim(`in:${e.id}`)) return;
     try {
       let text = e.text.replaceAll(mention, '').trim().replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&');
       let a = this.state.agents.find(a => this.key(a) === bound);
+      if (bot) {
+        // Bot collaborators can prompt exactly their configured agent; management stays human-owned.
+        if (!a) a = this.state.agents.find(agent => agent.channelId === e.channel && agent.name === bot.agentName);
+        if (!a || a.name !== bot.agentName) return;
+        if (text === a.name || text.startsWith(a.name + ' ')) text = text.slice(a.name.length).trim();
+        if (/^(connect|list|help|new|share|unshare|revoke|remove|approve|deny|answer)(?:\s|$)/.test(text)
+          || text === 'sab stop' || text === '/sab-stop') return;
+      }
       if (!a) {
         const [command, name, person] = text.split(/\s+/);
         if (command === 'connect') {
@@ -155,14 +181,20 @@ export class Router {
         if (!a) throw new Error('Unknown agent. Use “list” or connect and register one from your computer.');
         text = text.slice(command.length).trim();
       }
-      if (a.ownerId !== e.user && !a.collaboratorIds.includes(e.user)) throw new Error('This agent has not been shared with you');
+      if (!this.canPrompt(a, e)) throw new Error('This agent has not been shared with you');
       if (!text) throw new Error('Add a question');
       if (!this.isOnline(a.deviceId)) throw new Error('This agent’s computer is offline. Nothing was sent; try again when its connector is running.');
       const queue = this.queues.get(a.deviceId) || [];
       if (queue.length >= 10) throw new Error('Connector queue is full; try again later');
+      if (bot) {
+        const key = `${e.channel}:${root}:${e.botId}:${a.name}`;
+        const counts = this.state.botTurns ||= {};
+        if ((counts[key] || 0) >= (bot.maxTurnsPerThread ?? 3)) return;
+        counts[key] = (counts[key] || 0) + 1;
+      }
       this.state.roots[`${e.channel}:${root}`] = this.key(a); this.save();
       queue.push({ name: a.name, threadId: a.threadId, ownerId: a.ownerId, channelId: a.channelId,
-        collaboratorIds: [...a.collaboratorIds], event: { ...e, text, threadTs: root } });
+        collaboratorIds: this.collaborators(a), event: { ...e, text, threadTs: root } });
       this.queues.set(a.deviceId, queue);
     } catch (error) { await this.post(e.channel, error instanceof Error ? error.message : 'Request failed; not retried', root); }
     finally { this.journal.done(`in:${e.id}`); }

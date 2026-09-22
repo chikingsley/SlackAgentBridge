@@ -15,8 +15,8 @@ async function main() {
       if (fs.existsSync(file)) throw new Error('This connector is already configured. Use another --config file for another device connection.');
       const url = safeEndpoint(argument('url') || '');
       const invite = argument('invite'); if (!invite) throw new Error('Mention Codex Agent with “connect” in your authorized private Slack channel to get an invitation');
-      const enrolled = connectorConfig.omit({ url: true, agents: true, codexPath: true }).parse(await call(url, '', '/enroll', { code: invite }));
-      save(file, { ...enrolled, url, agents: [], codexPath: argument('codex') });
+      const enrolled = connectorConfig.omit({ url: true, agents: true, codexPath: true, appServerSocket: true, trustedBots: true }).parse(await call(url, '', '/enroll', { code: invite }));
+      save(file, { ...enrolled, url, agents: [], codexPath: argument('codex'), appServerSocket: argument('app-server-socket') });
       console.log('Computer paired. Add a selected task with npm run agent -- --name NAME --cwd WORKSPACE, then npm run start:connector.');
       return;
     }
@@ -32,15 +32,18 @@ async function main() {
     const cwdArg = argument('cwd'); if (!cwdArg) throw new Error('Choose the local workspace with --cwd');
     const cwd = fs.realpathSync(path.resolve(cwdArg));
     if (!fs.statSync(cwd).isDirectory()) throw new Error('Workspace must be a directory');
-    const rpc = new AppServer(argument('codex', config.codexPath));
+    const socketPath = argument('app-server-socket', config.appServerSocket);
+    const rpc = new AppServer(argument('codex', config.codexPath), undefined, undefined, socketPath);
     try {
       await rpc.start();
       const existing = argument('thread');
       let threadId: string;
       if (existing) {
         // Verify only the explicitly selected task. Never list history or steal a writer.
-        const result = await rpc.request('thread/resume', { threadId: existing, excludeTurns: true });
+        const result = await rpc.request('thread/read', { threadId: existing, includeTurns: false });
         if (result.thread?.id !== existing) throw new Error('Codex returned a different task');
+        if (result.thread?.cwd && fs.realpathSync(result.thread.cwd) !== cwd) throw new Error('Selected task belongs to a different workspace');
+        if (!socketPath && result.thread.status?.type === 'active') throw new Error('Use the shared App Server socket to attach an active desktop task');
         threadId = existing;
       } else {
         const result = await rpc.request('thread/start', { cwd, approvalPolicy: 'on-request', sandbox: 'read-only',
@@ -51,7 +54,7 @@ async function main() {
       }
       // Persist native identity before network side effects. Retry registration, never task creation.
       config.agents.push({ name, threadId, cwd });
-      config.codexPath = argument('codex', config.codexPath); save(file, config);
+      config.codexPath = argument('codex', config.codexPath); config.appServerSocket = socketPath; save(file, config);
       await call(config.url, config.token, '/register', { name, threadId });
       console.log(`Registered ${name}: ${threadId}. Start npm run start:connector, then mention Codex Agent with “${name} your question”.`);
     } finally { await rpc.close(); }

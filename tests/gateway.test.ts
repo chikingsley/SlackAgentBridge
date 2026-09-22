@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Router } from '../src/gateway/router.js';
-import { safeEndpoint, type GatewayConfig, type Input } from '../src/gateway/protocol.js';
+import { safeEndpoint, gatewayConfig, verifyChannel, type GatewayConfig, type Input } from '../src/gateway/protocol.js';
 import { createApi } from '../src/gateway/http.js';
 import { call } from '../src/connector/client.js';
 
@@ -116,4 +116,47 @@ test('unregister removes only this connector’s agent and rejects its old outpu
   expect(s.router.poll(s.owner.token)?.name).toBe('windows');
   s.router.unregister(s.owner.token, 'windows');
   await expect(s.router.output(s.owner.token, { id: 'out-1', name: 'windows', threadId: 'thread-windows', root: '1.123', text: 'stale' })).rejects.toThrow();
+});
+
+test('public channels require exact opt-in and bot membership', t => {
+  const s = setup(); t.onTestFinished(() => fs.rmSync(s.dir, { recursive: true }));
+  expect(() => verifyChannel(s.config, 'C123', { is_private: false, is_member: true })).toThrow();
+  s.config.publicChannelIds = ['C123'];
+  expect(() => verifyChannel(s.config, 'C123', { is_private: false, is_member: true })).not.toThrow();
+  expect(() => verifyChannel(s.config, 'C123', { is_private: false, is_member: false })).toThrow();
+  expect(() => gatewayConfig.parse({ ...s.config, publicChannelIds: ['C999'] })).toThrow();
+});
+
+test('only configured bot identity can explicitly prompt its exact agent and channel', async t => {
+  const s = setup(); t.onTestFinished(() => fs.rmSync(s.dir, { recursive: true }));
+  s.config.botCollaborators = [{ userId: 'UFABLE', botId: 'BFABLE', channelId: 'C123', agentName: 'windows' }];
+  const fromBot = { user: 'UFABLE', botId: 'BFABLE', subtype: 'bot_message', threadTs: '10.123' };
+  await s.router.receive(s.input('<@UBOT> windows check DNS', { ...fromBot, botId: 'BOTHER' }));
+  await s.router.receive(s.input('<@UBOT> windows check DNS', { ...fromBot, channel: 'C999' }));
+  await s.router.receive(s.input('<@UBOT> windows forged human', { user: 'UFABLE' }));
+  expect(s.router.poll(s.owner.token)).toBeNull();
+  await s.router.receive(s.input('<@UBOT> windows check DNS', fromBot));
+  const job = s.router.poll(s.owner.token)!;
+  expect(job.name).toBe('windows'); expect(job.event.botId).toBe('BFABLE');
+  expect(job.event.text).toBe('check DNS'); expect(job.collaboratorIds).toEqual(['UFABLE']);
+  await s.router.receive(s.input('ordinary bot reply', fromBot));
+  await s.router.receive(s.input('<@UBOT> approve secret', fromBot));
+  await s.router.receive(s.input('<@UBOT> share windows <@U456>', fromBot));
+  await s.router.receive(s.input('<@UBOT> connect', fromBot));
+  expect(s.router.poll(s.owner.token)).toBeNull(); expect(s.privateMessages).toHaveLength(0);
+});
+
+test('bot loop budget survives restart, and revoked bot access cancels queued work', async t => {
+  const s = setup(); t.onTestFinished(() => fs.rmSync(s.dir, { recursive: true }));
+  s.config.botCollaborators = [{ userId: 'UFABLE', botId: 'BFABLE', channelId: 'C123', agentName: 'windows', maxTurnsPerThread: 1 }];
+  const fromBot = { user: 'UFABLE', botId: 'BFABLE', subtype: 'bot_message', threadTs: '10.123' };
+  await s.router.receive(s.input('<@UBOT> windows first', fromBot));
+  expect(s.router.poll(s.owner.token)?.name).toBe('windows');
+  const restored = new Router(s.config, 'UBOT', s.file, async () => {}, async () => {});
+  restored.poll(s.owner.token);
+  await restored.receive(s.input('<@UBOT> windows second', fromBot));
+  expect(restored.poll(s.owner.token)).toBeNull();
+  await restored.receive(s.input('<@UBOT> windows next root', { ...fromBot, threadTs: '11.123' }));
+  s.config.botCollaborators = [];
+  expect(restored.poll(s.owner.token)).toBeNull();
 });

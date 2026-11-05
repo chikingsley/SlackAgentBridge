@@ -7,7 +7,7 @@ conversation discovery, or history import.
 
 ## Connect your computer
 
-You need Node.js 22.12+ and Codex already installed and signed in. The gateway
+You need Node.js 22.19+ and Codex already installed and signed in. The gateway
 must be reachable from your computer. Our deployment uses the existing private
 Tailscale network; Slack desktop is optional (Slack web works).
 
